@@ -122,6 +122,12 @@ body {
   100% { box-shadow: 0 0 0 0 rgba(51, 181, 229, 0); }
 }
 
+@keyframes pulse-orange {
+  0% { opacity: 0.4; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.2); }
+  100% { opacity: 0.4; transform: scale(1); }
+}
+
 /* Botones y Entradas */
 .luxury-button {
   background: var(--gold-gradient);

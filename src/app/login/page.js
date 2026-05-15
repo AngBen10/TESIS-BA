@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
 export default function LoginPage() {
@@ -8,7 +8,16 @@ export default function LoginPage() {
   const [contrasena, setContrasena] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const router = useRouter();
+
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      setMousePos({ x: e.clientX, y: e.clientY });
+    };
+    window.addEventListener('mousemove', handleMouseMove);
+    return () => window.removeEventListener('mousemove', handleMouseMove);
+  }, []);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -49,6 +58,18 @@ export default function LoginPage() {
       position: 'relative',
       overflow: 'hidden'
     }}>
+      {/* Interactive Background Glow */}
+      <div style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: `radial-gradient(600px circle at ${mousePos.x}px ${mousePos.y}px, rgba(0, 210, 190, 0.15), transparent 40%)`,
+        transition: 'background 0.1s ease',
+        zIndex: 0,
+      }} />
+
       {/* Imagen de fondo con overlay */}
       <div style={{ 
         position: 'absolute', 
@@ -56,7 +77,7 @@ export default function LoginPage() {
         backgroundImage: 'url("/restaurant_login_bg_1778447534514.png")',
         backgroundSize: 'cover',
         backgroundPosition: 'center',
-        opacity: 0.4,
+        opacity: 0.2,
         zIndex: 0
       }} />
 
@@ -64,7 +85,8 @@ export default function LoginPage() {
         position: 'absolute', 
         top: 0, left: 0, right: 0, bottom: 0,
         background: 'radial-gradient(circle at center, transparent 0%, #000 90%)',
-        zIndex: 1
+        zIndex: 1,
+        pointerEvents: 'none'
       }} />
       
       <div className="glass-card luxury-shadow" style={{ 
@@ -73,8 +95,9 @@ export default function LoginPage() {
         padding: '3rem',
         zIndex: 2,
         animation: 'fadeIn 1s ease-out',
-        border: '1px solid rgba(0, 210, 190, 0.1)',
-        background: 'rgba(10, 10, 10, 0.85)'
+        border: '1px solid rgba(0, 210, 190, 0.2)',
+        background: 'rgba(5, 5, 5, 0.6)',
+        backdropFilter: 'blur(16px)'
       }}>
         <div style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
           <h1 style={{ 

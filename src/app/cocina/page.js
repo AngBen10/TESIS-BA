@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 
-const MOCK_PEDIDOS = [
+const INITIAL_PEDIDOS = [
   {
     id: 1,
     mesa: 'Mesa 2',
@@ -22,7 +22,7 @@ const MOCK_PEDIDOS = [
 
 export default function Cocina() {
   const [user, setUser] = useState(null);
-  const [pedidos, setPedidos] = useState(MOCK_PEDIDOS);
+  const [pedidos, setPedidos] = useState([]);
   const router = useRouter();
 
   useEffect(() => {
@@ -32,7 +32,31 @@ export default function Cocina() {
     } else {
       setUser(JSON.parse(storedUser));
     }
+
+    // Load pedidos from localStorage or use initial
+    const storedPedidos = localStorage.getItem('restaurante_pedidos');
+    if (storedPedidos) {
+      setPedidos(JSON.parse(storedPedidos));
+    } else {
+      setPedidos(INITIAL_PEDIDOS);
+    }
+
+    // Listener for cross-page sync
+    const handleStorageChange = (e) => {
+      if (e.key === 'restaurante_pedidos') {
+        setPedidos(JSON.parse(e.newValue));
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
   }, [router]);
+
+  // Save pedidos to localStorage whenever they change
+  useEffect(() => {
+    if (pedidos.length > 0) {
+      localStorage.setItem('restaurante_pedidos', JSON.stringify(pedidos));
+    }
+  }, [pedidos]);
 
   if (!user) return null;
 

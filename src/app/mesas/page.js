@@ -4,20 +4,20 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 
-// Mock data for tables
-const MOCK_MESAS = [
-  { id: 1, numero: 1, capacidad: 2, estado: 'Ocupada', pedidoActivo: true },
-  { id: 2, numero: 2, capacidad: 2, estado: 'En Limpieza', pedidoActivo: false, tiempoRestante: 3 },
-  { id: 3, numero: 3, capacidad: 2, estado: 'Ocupada', pedidoActivo: true },
-  { id: 4, numero: 4, capacidad: 2, estado: 'Ocupada', pedidoActivo: true },
+// Initial state for tables - matching the actual empty kitchen state
+const INITIAL_MESAS = [
+  { id: 1, numero: 1, capacidad: 2, estado: 'Disponible', pedidoActivo: false },
+  { id: 2, numero: 2, capacidad: 2, estado: 'Ocupada', pedidoActivo: true }, // Keep Mesa 2 as occupied for demo
+  { id: 3, numero: 3, capacidad: 2, estado: 'Disponible', pedidoActivo: false },
+  { id: 4, numero: 4, capacidad: 2, estado: 'Disponible', pedidoActivo: false },
   { id: 5, numero: 5, capacidad: 4, estado: 'Disponible', pedidoActivo: false },
-  { id: 6, numero: 6, capacidad: 4, estado: 'Ocupada', pedidoActivo: true },
+  { id: 6, numero: 6, capacidad: 4, estado: 'Disponible', pedidoActivo: false },
   { id: 7, numero: 7, capacidad: 4, estado: 'Disponible', pedidoActivo: false },
-  { id: 8, numero: 8, capacidad: 4, estado: 'Disponible', pedidoActivo: false },
+  { id: 8, numero: 8, capacidad: 4, estado: 'En Limpieza', pedidoActivo: false, tiempoRestante: 300 },
   { id: 9, numero: 9, capacidad: 6, estado: 'Disponible', pedidoActivo: false },
   { id: 10, numero: 10, capacidad: 6, estado: 'Disponible', pedidoActivo: false },
   { id: 11, numero: 11, capacidad: 6, estado: 'Disponible', pedidoActivo: false },
-  { id: 12, numero: 12, capacidad: 6, estado: 'Ocupada', pedidoActivo: true },
+  { id: 12, numero: 12, capacidad: 6, estado: 'Disponible', pedidoActivo: false },
 ];
 
 const getStateColor = (estado) => {
@@ -32,7 +32,8 @@ const getStateColor = (estado) => {
 
 export default function Mesas() {
   const [user, setUser] = useState(null);
-  const [mesas, setMesas] = useState(MOCK_MESAS);
+  const [mesas, setMesas] = useState([]);
+  const [pedidos, setPedidos] = useState([]); // Load actual orders
   const [selectedMesa, setSelectedMesa] = useState(null);
   const [showCobrarModal, setShowCobrarModal] = useState(false);
   const [ruc, setRuc] = useState('');
@@ -47,7 +48,68 @@ export default function Mesas() {
     } else {
       setUser(JSON.parse(storedUser));
     }
+
+    // Load mesas from localStorage or use initial
+    const storedMesas = localStorage.getItem('restaurante_mesas');
+    if (storedMesas) {
+      setMesas(JSON.parse(storedMesas));
+    } else {
+      setMesas(INITIAL_MESAS);
+    }
+
+    // Load pedidos from localStorage
+    const storedPedidos = localStorage.getItem('restaurante_pedidos');
+    if (storedPedidos) {
+      setPedidos(JSON.parse(storedPedidos));
+    }
+
+    // Listener for cross-page sync
+    const handleStorageChange = (e) => {
+      if (e.key === 'restaurante_mesas') {
+        setMesas(JSON.parse(e.newValue));
+      }
+      if (e.key === 'restaurante_pedidos') {
+        setPedidos(JSON.parse(e.newValue));
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
   }, [router]);
+
+  // Save mesas to localStorage whenever they change
+  useEffect(() => {
+    if (mesas.length > 0) {
+      localStorage.setItem('restaurante_mesas', JSON.stringify(mesas));
+    }
+  }, [mesas]);
+
+  // Timer logic for "En Limpieza"
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setMesas(currentMesas => {
+        let changed = false;
+        const newMesas = currentMesas.map(mesa => {
+          if (mesa.estado === 'En Limpieza' && mesa.tiempoRestante > 0) {
+            changed = true;
+            return { ...mesa, tiempoRestante: mesa.tiempoRestante - 1 };
+          } else if (mesa.estado === 'En Limpieza' && mesa.tiempoRestante <= 0) {
+            changed = true;
+            return { ...mesa, estado: 'Disponible', tiempoRestante: 0 };
+          }
+          return mesa;
+        });
+        return changed ? newMesas : currentMesas;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const formatTime = (seconds) => {
+    if (!seconds && seconds !== 0) return "05:00";
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
 
   if (!user) return null;
 
@@ -142,27 +204,35 @@ export default function Mesas() {
                   Capacidad: {mesa.capacidad} pers.
                 </div>
 
-                {/* Pedido Activo */}
+                {/* Pedido Activo - Dynamic Check */}
                 <div style={{ minHeight: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  {mesa.pedidoActivo && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.75rem', fontWeight: '600', color: '#fff' }}>
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#f0ad4e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                        <polyline points="14 2 14 8 20 8"></polyline>
-                        <line x1="16" y1="13" x2="8" y2="13"></line>
-                        <line x1="16" y1="17" x2="8" y2="17"></line>
-                        <polyline points="10 9 9 9 8 9"></polyline>
-                      </svg>
-                      Pedido Activo
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: '2px' }}>
-                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                        <polyline points="22 4 12 14.01 9 11.01"></polyline>
-                      </svg>
-                    </div>
-                  )}
+                  {(() => {
+                    const pedidoMesa = pedidos.find(p => p.mesa === `Mesa ${mesa.numero}` && p.estado !== 'Entregado');
+                    if (!pedidoMesa && !mesa.pedidoActivo) return null;
+                    
+                    const isReady = pedidoMesa?.estado === 'Listo';
+                    
+                    return (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.75rem', fontWeight: '600', color: isReady ? 'var(--primary)' : '#f0ad4e' }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                          <polyline points="14 2 14 8 20 8"></polyline>
+                        </svg>
+                        {isReady ? 'Pedido Listo' : 'En Cocina'}
+                        
+                        {isReady ? (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: '2px' }}>
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                          </svg>
+                        ) : (
+                          <span style={{ marginLeft: '2px', animation: 'pulse-orange 1.5s infinite' }}>🕒</span>
+                        )}
+                      </div>
+                    );
+                  })()}
                   {mesa.estado === 'En Limpieza' && (
-                    <div style={{ color: 'var(--info)', fontSize: '0.75rem', fontWeight: '700' }}>
-                      ⏳ {mesa.tiempoRestante}m
+                    <div style={{ color: 'var(--info)', fontSize: '0.85rem', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                      <span style={{ fontSize: '1rem' }}>⏳</span> {formatTime(mesa.tiempoRestante)}
                     </div>
                   )}
                 </div>
@@ -171,13 +241,47 @@ export default function Mesas() {
           })}
         </div>
 
-        {/* Modal Detalles de Mesa */}
+        {/* Modal Detalles de Mesa - Scrollable Overlay */}
         {selectedMesa && (
-          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(5px)' }}>
-            <div className="glass-card luxury-shadow" style={{ width: '500px', maxWidth: '90%', padding: '2.5rem', background: '#080808', border: '1px solid rgba(0, 210, 190, 0.15)', borderRadius: '24px' }}>
+          <div style={{ 
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, 
+            background: 'rgba(0,0,0,0.85)', zIndex: 100, 
+            display: 'flex', justifyContent: 'center', 
+            backdropFilter: 'blur(5px)',
+            overflowY: 'auto', // Enable scrolling on the overlay
+            padding: '2rem 0'
+          }}>
+            <div className="glass-card luxury-shadow" style={{ 
+              width: '500px', maxWidth: '90%', 
+              padding: '2.5rem', background: '#080808', 
+              border: '1px solid rgba(0, 210, 190, 0.15)', 
+              borderRadius: '24px',
+              height: 'fit-content', // Let it grow
+              margin: 'auto' // Center it
+            }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
-                <h3 style={{ textTransform: 'uppercase', letterSpacing: '2px', fontWeight: '800', fontSize: '0.85rem', color: 'rgba(255,255,255,0.5)' }}>DETALLES DE MESA</h3>
-                <button onClick={() => setSelectedMesa(null)} style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.3)', fontSize: '1.5rem', cursor: 'pointer', transition: 'color 0.2s' }} onMouseOver={(e) => e.currentTarget.style.color='#fff'} onMouseOut={(e) => e.currentTarget.style.color='rgba(255,255,255,0.3)'}>✕</button>
+                <h3 style={{ textTransform: 'uppercase', letterSpacing: '2px', fontWeight: '800', fontSize: '0.85rem', color: 'rgba(255,255,255,0.5)' }}>DETALLES DE MESA {selectedMesa.numero}</h3>
+                <button 
+                  onClick={() => setSelectedMesa(null)} 
+                  style={{ 
+                    background: 'rgba(255,255,255,0.1)', 
+                    border: 'none', 
+                    color: '#fff', 
+                    width: '32px', 
+                    height: '32px', 
+                    borderRadius: '50%', 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'center', 
+                    cursor: 'pointer', 
+                    transition: 'all 0.2s',
+                    fontSize: '1rem'
+                  }} 
+                  onMouseOver={(e) => { e.currentTarget.style.background='rgba(255,255,255,0.2)'; e.currentTarget.style.transform='scale(1.1)'; }} 
+                  onMouseOut={(e) => { e.currentTarget.style.background='rgba(255,255,255,0.1)'; e.currentTarget.style.transform='scale(1)'; }}
+                >
+                  ✕
+                </button>
               </div>
 
               {/* Info Box Top */}
@@ -200,8 +304,24 @@ export default function Mesas() {
                     <button 
                       key={st}
                       onClick={() => {
-                        setMesas(mesas.map(m => m.id === selectedMesa.id ? { ...m, estado: st } : m));
-                        setSelectedMesa({...selectedMesa, estado: st});
+                        const newEstado = st;
+                        const newMesas = mesas.map(m => {
+                          if (m.id === selectedMesa.id) {
+                            const update = { ...m, estado: newEstado };
+                            if (newEstado === 'En Limpieza') {
+                              update.tiempoRestante = 300; // 5 minutes
+                              update.pedidoActivo = false;
+                            } else if (newEstado === 'Ocupada') {
+                              update.pedidoActivo = true;
+                            } else {
+                              update.pedidoActivo = false;
+                            }
+                            return update;
+                          }
+                          return m;
+                        });
+                        setMesas(newMesas);
+                        setSelectedMesa({...selectedMesa, estado: newEstado, tiempoRestante: newEstado === 'En Limpieza' ? 300 : selectedMesa.tiempoRestante});
                       }}
                       style={{ 
                         padding: '12px 0', 
@@ -221,42 +341,48 @@ export default function Mesas() {
                 </div>
               </div>
 
-              {selectedMesa.estado === 'Ocupada' && (
-                <div style={{ marginBottom: '2.5rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px', alignItems: 'center' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="9" cy="21" r="1"></circle>
-                        <circle cx="20" cy="21" r="1"></circle>
-                        <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
-                      </svg>
-                      <span style={{ fontSize: '0.85rem', color: 'var(--primary)', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '1px' }}>CONSUMO ACTUAL</span>
-                    </div>
-                    <span style={{ fontSize: '0.65rem', background: 'rgba(0, 210, 190, 0.1)', color: 'var(--primary)', padding: '4px 10px', borderRadius: '6px', fontWeight: '800', border: '1px solid rgba(0, 210, 190, 0.2)' }}>ORDEN #284</span>
-                  </div>
-                  
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', padding: '0 5px' }}>
-                    {[
-                      { q: 1, n: 'Surubí a la Plancha', p: 45000 },
-                      { q: 1, n: 'Milanesa Napolitana', p: 40000 },
-                      { q: 2, n: 'Jugo Natural', p: 24000 }
-                    ].map((item, i) => (
-                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.95rem', alignItems: 'center' }}>
-                        <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: '500' }}>
-                          <span style={{ color: 'var(--primary)', fontWeight: '900', marginRight: '10px' }}>{item.q}x</span> 
-                          {item.n}
-                        </span>
-                        <span style={{ color: 'rgba(255,255,255,0.4)', fontVariantNumeric: 'tabular-nums', fontWeight: '600' }}>Gs. {item.p.toLocaleString('es-PY')}</span>
-                      </div>
-                    ))}
-                  </div>
+              {selectedMesa.estado === 'Ocupada' && (() => {
+                const pedidoMesa = pedidos.find(p => p.mesa === `Mesa ${selectedMesa.numero}` && p.estado !== 'Entregado');
+                const items = pedidoMesa?.items || [
+                  { id: 1, cantidad: 1, nombre: 'Surubí a la Plancha', p: 45000 },
+                  { id: 2, cantidad: 1, nombre: 'Milanesa Napolitana', p: 40000 },
+                  { id: 3, cantidad: 2, nombre: 'Jugo Natural', p: 24000 }
+                ];
+                const total = items.reduce((acc, item) => acc + (item.p || 0), 0) || 109000;
 
-                  <div style={{ marginTop: '2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(0, 210, 190, 0.05)', padding: '1.25rem', borderRadius: '16px', border: '1px solid rgba(0, 210, 190, 0.1)' }}>
-                    <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: '0.85rem', fontWeight: '700' }}>TOTAL:</span>
-                    <span style={{ fontWeight: '900', fontSize: '1.8rem', color: 'var(--primary)', letterSpacing: '-1px' }}>Gs. 109.000</span>
+                return (
+                  <div style={{ marginBottom: '2.5rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="9" cy="21" r="1"></circle>
+                          <circle cx="20" cy="21" r="1"></circle>
+                          <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
+                        </svg>
+                        <span style={{ fontSize: '0.85rem', color: 'var(--primary)', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '1px' }}>CONSUMO ACTUAL</span>
+                      </div>
+                      <span style={{ fontSize: '0.65rem', background: 'rgba(0, 210, 190, 0.1)', color: 'var(--primary)', padding: '4px 10px', borderRadius: '6px', fontWeight: '800', border: '1px solid rgba(0, 210, 190, 0.2)' }}>ORDEN #{pedidoMesa?.id || '284'}</span>
+                    </div>
+                    
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', padding: '0 5px', maxHeight: '150px', overflowY: 'auto' }}>
+                      {items.map((item, i) => (
+                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.95rem', alignItems: 'center' }}>
+                          <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: '500' }}>
+                            <span style={{ color: 'var(--primary)', fontWeight: '900', marginRight: '10px' }}>{item.cantidad}x</span> 
+                            {item.nombre}
+                          </span>
+                          <span style={{ color: 'rgba(255,255,255,0.4)', fontVariantNumeric: 'tabular-nums', fontWeight: '600' }}>Gs. {(item.p || (item.nombre === 'Surubí a la Plancha' ? 45000 : item.nombre === 'Milanesa Napolitana' ? 40000 : 12000)).toLocaleString('es-PY')}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div style={{ marginTop: '2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(0, 210, 190, 0.05)', padding: '1.25rem', borderRadius: '16px', border: '1px solid rgba(0, 210, 190, 0.1)' }}>
+                      <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: '0.85rem', fontWeight: '700' }}>TOTAL:</span>
+                      <span style={{ fontWeight: '900', fontSize: '1.8rem', color: 'var(--primary)', letterSpacing: '-1px' }}>Gs. {total.toLocaleString('es-PY')}</span>
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
                 <button 
@@ -306,8 +432,26 @@ export default function Mesas() {
                   COBRAR MESA
                 </button>
               </div>
-              <div style={{ textAlign: 'center', marginTop: '1.5rem' }}>
+              <div style={{ textAlign: 'center', marginTop: '1.5rem', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 <a href="#" style={{ color: 'rgba(255,255,255,0.3)', fontSize: '0.8rem', textDecoration: 'none', fontWeight: '600' }}>Ver Detalle del Pedido</a>
+                <button 
+                  onClick={() => setSelectedMesa(null)}
+                  style={{ 
+                    background: 'rgba(255,255,255,0.05)', 
+                    color: 'rgba(255,255,255,0.5)', 
+                    border: '1px solid rgba(255,255,255,0.1)', 
+                    padding: '12px', 
+                    borderRadius: '12px', 
+                    cursor: 'pointer', 
+                    fontSize: '0.8rem', 
+                    fontWeight: 'bold',
+                    marginTop: '10px'
+                  }}
+                  onMouseOver={(e) => { e.currentTarget.style.background='rgba(255,255,255,0.1)'; e.currentTarget.style.color='#fff'; }}
+                  onMouseOut={(e) => { e.currentTarget.style.background='rgba(255,255,255,0.05)'; e.currentTarget.style.color='rgba(255,255,255,0.5)'; }}
+                >
+                  CERRAR VENTANA
+                </button>
               </div>
             </div>
           </div>
@@ -374,8 +518,8 @@ export default function Mesas() {
                 onClick={() => {
                   alert(`Factura ${ruc === 'X' || ruc === 'x' ? 'Ticket' : 'Legal'} impresa para: ${nombreCliente}.\nTotal: Gs. 109.000\nMétodo: ${metodoPago}`);
                   setShowCobrarModal(false);
+                  setMesas(mesas.map(m => m.id === selectedMesa.id ? { ...m, estado: 'En Limpieza', pedidoActivo: false, tiempoRestante: 300 } : m));
                   setSelectedMesa(null);
-                  setMesas(mesas.map(m => m.id === selectedMesa.id ? { ...m, estado: 'En Limpieza', pedidoActivo: false } : m));
                 }}
                 className="luxury-button" 
                 style={{ width: '100%' }}

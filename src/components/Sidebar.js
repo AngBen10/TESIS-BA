@@ -82,11 +82,11 @@ export default function Sidebar({ user }) {
             fontSize: '1.4rem', fontWeight: '900', color: '#000',
             boxShadow: '0 4px 15px rgba(0, 210, 190, 0.3)'
           }}>L</div>
-          <h2 style={{ fontSize: '1.2rem', fontWeight: '900', color: '#fff', letterSpacing: '0.5px' }}>
+          <h2 style={{ fontSize: '1rem', fontWeight: '900', color: '#fff', letterSpacing: '0.5px' }}>
             La Parada Bar
           </h2>
         </div>
-        <p style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.3)', letterSpacing: '2.5px', paddingLeft: '56px', fontWeight: '700', textTransform: 'uppercase' }}>
+        <p style={{ fontSize: '0.6rem', color: 'rgba(255,255,255,0.3)', letterSpacing: '2.5px', paddingLeft: '56px', fontWeight: '700', textTransform: 'uppercase' }}>
           Facturación
         </p>
       </div>
@@ -94,7 +94,7 @@ export default function Sidebar({ user }) {
       {/* Nav */}
       <nav style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
         <p style={{
-          fontSize: '0.6rem', color: 'var(--text-muted)', fontWeight: '700',
+          fontSize: '0.55rem', color: 'var(--text-muted)', fontWeight: '700',
           marginBottom: '6px', paddingLeft: '0.6rem', letterSpacing: '2px'
         }}>SALÓN</p>
 
@@ -105,14 +105,14 @@ export default function Sidebar({ user }) {
               key={item.path}
               onClick={() => router.push(item.path)}
               style={{
-                padding: '0.65rem 0.8rem',
+                padding: '0.55rem 0.8rem',
                 borderRadius: '10px',
                 background: isActive
                   ? 'linear-gradient(90deg, rgba(0, 210, 190, 0.18) 0%, transparent 100%)'
                   : 'transparent',
                 color: isActive ? '#fff' : 'rgba(255,255,255,0.38)',
                 fontWeight: isActive ? '700' : '500',
-                fontSize: '0.82rem',
+                fontSize: '0.75rem',
                 borderLeft: isActive ? '3px solid var(--primary)' : '3px solid transparent',
                 cursor: 'pointer',
                 display: 'flex',
@@ -121,7 +121,7 @@ export default function Sidebar({ user }) {
                 transition: 'all 0.25s ease',
               }}
             >
-              <span style={{ fontSize: '0.85rem', opacity: isActive ? 1 : 0.5 }}>{item.icon}</span>
+              <span style={{ fontSize: '0.8rem', opacity: isActive ? 1 : 0.5 }}>{item.icon}</span>
               {item.label}
             </div>
           );
@@ -133,10 +133,10 @@ export default function Sidebar({ user }) {
 
       {/* Powered by ANGLEX */}
       <div style={{ textAlign: 'center', marginBottom: '1.2rem', opacity: 0.9 }}>
-        <p style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.4)', fontWeight: '500', marginBottom: '4px' }}>
+        <p style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.4)', fontWeight: '500', marginBottom: '4px' }}>
           Powered by <span style={{ color: 'var(--primary)', fontWeight: '800' }}>ANGLEX</span>
         </p>
-        <p style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.3)', fontWeight: '500' }}>Software Solutions v2026</p>
+        <p style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.3)', fontWeight: '500' }}>Software Solutions v2026</p>
       </div>
 
       {/* User Profile */}
@@ -144,8 +144,8 @@ export default function Sidebar({ user }) {
         <div style={{
           display: 'flex',
           alignItems: 'center',
-          gap: '12px',
-          padding: '0.8rem 1rem',
+          gap: '10px',
+          padding: '0.7rem 0.8rem',
           background: 'rgba(255,255,255,0.05)',
           borderRadius: '16px',
           border: '1px solid rgba(255,255,255,0.08)',
@@ -153,33 +153,33 @@ export default function Sidebar({ user }) {
         }}>
           {/* Avatar con gradiente */}
           <div style={{
-            width: '42px', height: '42px',
+            width: '36px', height: '36px',
             background: 'linear-gradient(135deg, #f0ad4e 0%, #dc3545 100%)',
-            borderRadius: '12px',
+            borderRadius: '10px',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontWeight: '900', fontSize: '1.1rem', color: '#fff',
+            fontWeight: '900', fontSize: '1rem', color: '#fff',
             flexShrink: 0,
             boxShadow: '0 4px 10px rgba(0,0,0,0.3)',
             position: 'relative'
           }}>
              <div style={{
                 position: 'absolute', bottom: '-2px', right: '-2px',
-                width: '18px', height: '18px', background: '#000',
+                width: '16px', height: '16px', background: '#000',
                 borderRadius: '50%', border: '2px solid #1a1d24',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: '0.6rem'
+                fontSize: '0.55rem'
              }}>N</div>
           </div>
 
           {/* Name + Role */}
           <div style={{ flex: 1, overflow: 'hidden' }}>
             <p style={{
-              fontSize: '0.9rem', fontWeight: '800', color: '#fff',
+              fontSize: '0.8rem', fontWeight: '800', color: '#fff',
               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
             }}>
               {user.nombre}
             </p>
-            <p style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', fontWeight: '800', letterSpacing: '0.5px' }}>
+            <p style={{ fontSize: '0.6rem', color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', fontWeight: '800', letterSpacing: '0.5px' }}>
               {user.roleId === 1 ? 'ADMINISTRADOR' : user.roleId === 2 ? 'CAJERO' : 'MESERO'}
             </p>
           </div>
