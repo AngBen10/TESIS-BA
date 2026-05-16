@@ -11,96 +11,164 @@ export default function Menu() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCat, setSelectedCat] = useState('Todas');
   const [cart, setCart] = useState([]);
-  const [selectedMesa, setSelectedMesa] = useState('2');
-  
-  // UI States
+  const [selectedMesa, setSelectedMesa] = useState('1');
   const [showAdmin, setShowAdmin] = useState(false);
   const [showModal, setShowModal] = useState(false);
-  
-  // Form state
   const [editingProd, setEditingProd] = useState(null);
   const [formProd, setFormProd] = useState({ codigo: '', nombre: '', precio: '', categoriaId: '', requierePreparacion: true, stockActual: 0, stockMinimo: 0 });
-
+  const [nota, setNota] = useState('');
+  const [sending, setSending] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
     const storedUser = localStorage.getItem('user');
-    if (!storedUser) {
-      router.push('/login');
-    } else {
-      setUser(JSON.parse(storedUser));
-      fetchData();
-    }
+    if (!storedUser) { router.push('/login'); return; }
+    setUser(JSON.parse(storedUser));
+    fetchData();
+
+    // Read mesa from URL query
+    const params = new URLSearchParams(window.location.search);
+    const mesaQ = params.get('mesa');
+    if (mesaQ) setSelectedMesa(mesaQ);
   }, [router]);
 
   const fetchData = async () => {
     try {
-      const [prodRes, catRes] = await Promise.all([
-        fetch('/api/productos'),
-        fetch('/api/categorias')
-      ]);
-      const prodData = await prodRes.json();
-      const catData = await catRes.json();
-      setProducts(prodData);
-      setCategories(catData);
-    } catch (err) {
-      console.error('Error loading data:', err);
-    }
+      const [pRes, cRes] = await Promise.all([fetch('/api/productos'), fetch('/api/categorias')]);
+      setProducts(await pRes.json());
+      setCategories(await cRes.json());
+    } catch (err) { console.error(err); }
   };
 
   const addToCart = (product) => {
-    if (product.StockActual <= 0) {
-      alert(`El producto ${product.Nombre} no tiene stock disponible.`);
-      return;
+    const isUnlimited = product.RequierePreparacion;
+    if (!isUnlimited && product.StockActual <= 0) { 
+      alert(`Sin stock: ${product.Nombre}`); return; 
     }
-
-    const existing = cart.find(item => item.id === product.Id);
+    const existing = cart.find(i => i.id === product.Id);
     if (existing) {
-      if (existing.cantidad >= product.StockActual) {
-        alert('No hay suficiente stock para añadir más unidades.');
-        return;
+      if (!isUnlimited && existing.cantidad >= product.StockActual) { 
+        alert('Stock insuficiente.'); return; 
       }
-      setCart(cart.map(item => item.id === product.Id ? { ...item, cantidad: item.cantidad + 1 } : item));
+      setCart(cart.map(i => i.id === product.Id ? { ...i, cantidad: i.cantidad + 1 } : i));
     } else {
-      setCart([...cart, { id: product.Id, nombre: product.Nombre, precio: product.Precio, cantidad: 1 }]);
+      setCart([...cart, { 
+        id: product.Id, 
+        nombre: product.Nombre, 
+        precio: product.Precio, 
+        cantidad: 1, 
+        requierePreparacion: product.RequierePreparacion 
+      }]);
     }
   };
 
-  const removeFromCart = (id) => {
-    setCart(cart.filter(item => item.id !== id));
+  const updateQty = (id, delta) => {
+    setCart(prev => prev
+      .map(i => i.id === id ? { ...i, cantidad: i.cantidad + delta } : i)
+      .filter(i => i.cantidad > 0)
+    );
   };
 
-  const total = cart.reduce((acc, item) => acc + (item.precio * item.cantidad), 0);
+  const total = cart.reduce((a, i) => a + i.precio * i.cantidad, 0);
 
-  const enviarPedido = () => {
+  const enviarPedido = async () => {
     if (cart.length === 0) return;
-    alert(`Pedido enviado a la Mesa ${selectedMesa}.`);
-    setCart([]);
-    router.push('/mesas');
+    setSending(true);
+    try {
+      const storedUser = localStorage.getItem('user');
+      const u = storedUser ? JSON.parse(storedUser) : {};
+      const mesaLabel = `Mesa ${selectedMesa}`;
+
+      // Load current orders
+      const raw = localStorage.getItem('restaurante_pedidos');
+      let pedidos = raw ? JSON.parse(raw) : [];
+
+      // Determine new state: if any item in the cart needs prep, it goes to Pendiente.
+      // If none need prep, it goes to Listo (direct to delivery).
+      const needsPrep = cart.some(i => i.requierePreparacion);
+      const newState = needsPrep ? 'Pendiente' : 'Listo';
+
+      // Always create a NEW order entry for each "batch"
+      pedidos.push({
+        id: Date.now().toString().slice(-5),
+        mesa: mesaLabel,
+        fecha: new Date().toLocaleString('es-PY'),
+        items: cart.map(i => ({ ...i })),
+        nota: nota,
+        mesero: u.nombre || 'Mesero',
+        estado: newState,
+      });
+
+      localStorage.setItem('restaurante_pedidos', JSON.stringify(pedidos));
+
+      // Deduct stock in DB
+      for (const item of cart) {
+        const prod = products.find(p => p.Id === item.id);
+        // Only deduct if it's NOT unlimited (not requiring prep) and has stock tracking
+        if (prod && !prod.RequierePreparacion) {
+          try {
+            const newStock = Math.max(0, prod.StockActual - item.cantidad);
+            await fetch(`/api/productos/${prod.Id}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                codigo: prod.Codigo || '',
+                nombre: prod.Nombre,
+                precio: prod.Precio,
+                categoriaId: prod.CategoriaId,
+                requierePreparacion: prod.RequierePreparacion,
+                stockActual: newStock,
+                stockMinimo: prod.StockMinimo || 0
+              })
+            });
+          } catch (err) { console.error("Error updating stock:", err); }
+        }
+      }
+
+      // Update table state to Ocupada
+      const rawMesas = localStorage.getItem('restaurante_mesas');
+      if (rawMesas) {
+        const mesas = JSON.parse(rawMesas);
+        const idx = mesas.findIndex(m => m.numero.toString() === selectedMesa.toString());
+        if (idx !== -1) {
+          mesas[idx].estado = 'Ocupada';
+          mesas[idx].pedidoActivo = true;
+          localStorage.setItem('restaurante_mesas', JSON.stringify(mesas));
+        }
+      }
+
+      window.dispatchEvent(new Event('pedidos_updated'));
+      setCart([]);
+      setNota('');
+      router.push('/mesas');
+    } catch (e) {
+      console.error(e);
+      alert('Error al enviar pedido');
+    } finally { setSending(false); }
   };
 
   const openModal = (prod = null) => {
     if (prod) {
       setEditingProd(prod);
       setFormProd({ 
-        codigo: prod.Codigo || '',
+        codigo: prod.Codigo || '', 
         nombre: prod.Nombre, 
         precio: prod.Precio, 
         categoriaId: prod.CategoriaId, 
-        requierePreparacion: prod.RequierePreparacion,
-        stockActual: prod.StockActual || 0,
-        stockMinimo: prod.StockMinimo || 0
+        requierePreparacion: prod.RequierePreparacion ?? true, 
+        stockActual: prod.StockActual || 0, 
+        stockMinimo: prod.StockMinimo || 0 
       });
     } else {
       setEditingProd(null);
       setFormProd({ 
-        codigo: '',
+        codigo: '', 
         nombre: '', 
         precio: '', 
         categoriaId: categories[0]?.Id || '', 
-        requierePreparacion: true,
-        stockActual: 0,
-        stockMinimo: 0
+        requierePreparacion: true, 
+        stockActual: 0, 
+        stockMinimo: 0 
       });
     }
     setShowModal(true);
@@ -110,40 +178,23 @@ export default function Menu() {
     e.preventDefault();
     const method = editingProd ? 'PUT' : 'POST';
     const url = editingProd ? `/api/productos/${editingProd.Id}` : '/api/productos';
-
     try {
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formProd)
-      });
-      if (res.ok) {
-        setShowModal(false);
-        fetchData();
-      } else {
-        const errorData = await res.json();
-        alert(`Error al guardar: ${errorData.error || 'Ocurrió un problema'}`);
-      }
-    } catch (err) {
-      console.error('Error saving product:', err);
-      alert('Error de conexión al servidor.');
-    }
+      const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(formProd) });
+      if (res.ok) { setShowModal(false); fetchData(); }
+      else { const d = await res.json(); alert(`Error: ${d.error || 'Problema desconocido'}`); }
+    } catch { alert('Error de conexión'); }
   };
 
-  const handleDeleteProduct = async (id) => {
-    if (!confirm('¿Seguro que desea eliminar este producto?')) return;
-    try {
-      const res = await fetch(`/api/productos/${id}`, { method: 'DELETE' });
-      if (res.ok) fetchData();
-    } catch (err) {
-      console.error('Error deleting product:', err);
-    }
+  const handleDelete = async (id) => {
+    if (!confirm('¿Eliminar producto?')) return;
+    const res = await fetch(`/api/productos/${id}`, { method: 'DELETE' });
+    if (res.ok) fetchData();
   };
 
-  const filteredProducts = products.filter(p => {
-    const matchesSearch = p.Nombre.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCat = selectedCat === 'Todas' || p.CategoriaNombre === selectedCat;
-    return matchesSearch && matchesCat;
+  const filtered = products.filter(p => {
+    const s = p.Nombre.toLowerCase().includes(searchTerm.toLowerCase());
+    const c = selectedCat === 'Todas' || p.CategoriaNombre === selectedCat;
+    return s && c;
   });
 
   if (!user) return null;
@@ -151,130 +202,106 @@ export default function Menu() {
   return (
     <div className="desktop-app">
       <Sidebar user={user} />
+      <main className="main-view" style={{ display: 'flex', gap: '1.5rem', padding: '1.5rem 2rem' }}>
 
-      <main className="main-view" style={{ display: 'flex', gap: '2rem' }}>
-        
-        {/* Lado Izquierdo: Menú o Admin */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-          <header style={{ marginBottom: '2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        {/* LEFT: Catalog */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+          {/* Header */}
+          <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.2rem' }}>
             <div>
-              <h1 style={{ fontSize: '1.5rem', fontWeight: '800', color: '#fff', marginBottom: '0.2rem', letterSpacing: '0px' }}>
-                {showAdmin ? '⚙️ Gestión de Inventario' : '🍽️ Menú / Añadir Producto'}
+              <h1 style={{ fontSize: '1.5rem', fontWeight: '900', color: '#fff' }}>
+                {showAdmin ? '⚙️ Gestión de Inventario' : '🍽️ Catálogo'}
               </h1>
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                {showAdmin ? 'Administre los productos, precios y stock del catálogo' : 'Seleccione productos para la mesa actual'}
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+                {showAdmin ? 'Administre productos, precios y stock' : 'Seleccione productos para agregar al pedido'}
               </p>
             </div>
-            <div style={{ display: 'flex', gap: '10px' }}>
+            <div style={{ display: 'flex', gap: '8px' }}>
               {showAdmin && (
-                <button 
-                  onClick={() => openModal()}
-                  className="luxury-button"
-                  style={{ background: 'var(--accent-gradient)', color: '#000', fontSize: '0.85rem', padding: '10px 20px' }}
-                >
-                  + Nuevo Producto
+                <button onClick={() => openModal()} className="luxury-button" style={{ background: 'var(--accent-gradient)', color: '#000', fontSize: '0.78rem', padding: '9px 18px' }}>
+                  + Nuevo
                 </button>
               )}
               {user.roleId === 1 && (
-                <button 
-                  onClick={() => setShowAdmin(!showAdmin)}
-                  className="luxury-button"
-                  style={{ background: 'rgba(255,255,255,0.05)', color: showAdmin ? 'var(--primary)' : '#fff', border: '1px solid var(--border)', fontSize: '0.85rem', padding: '10px 20px' }}
-                >
-                  {showAdmin ? 'Volver al Menú' : '⚙️ Administrar'}
+                <button onClick={() => setShowAdmin(!showAdmin)} className="luxury-button" style={{ background: 'rgba(255,255,255,0.05)', color: showAdmin ? 'var(--primary)' : '#fff', border: '1px solid var(--border)', fontSize: '0.78rem', padding: '9px 18px' }}>
+                  {showAdmin ? '← Menú' : '⚙️ Admin'}
                 </button>
               )}
             </div>
           </header>
 
-          <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem' }}>
-            <input 
-              type="text" 
-              placeholder="🔍 Buscar en el catálogo..." 
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+          {/* Filters */}
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '1rem', flexWrap: 'wrap' }}>
+            <input
+              type="text" placeholder="🔍 Buscar producto..."
+              value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
               className="luxury-input"
-              style={{ flex: 1, padding: '12px 16px', borderRadius: '12px', fontSize: '0.9rem' }}
+              style={{ flex: 1, minWidth: '160px', padding: '9px 14px', fontSize: '0.85rem' }}
             />
-            <select 
-              className="luxury-input" 
-              value={selectedCat} 
-              onChange={(e) => setSelectedCat(e.target.value)}
-              style={{ appearance: 'none', minWidth: '180px', cursor: 'pointer', padding: '12px 16px', borderRadius: '12px', fontSize: '0.9rem' }}
-            >
-              <option value="Todas">Todas las categorías</option>
-              {categories.map(cat => (
-                <option key={cat.Id} value={cat.Nombre} style={{ background: '#000' }}>{cat.Nombre}</option>
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+              {['Todas', ...categories.map(c => c.Nombre)].map(cat => (
+                <button key={cat} onClick={() => setSelectedCat(cat)} style={{
+                  padding: '7px 12px', fontSize: '0.7rem', fontWeight: '700', borderRadius: '8px', cursor: 'pointer',
+                  border: selectedCat === cat ? '1px solid var(--primary)' : '1px solid rgba(255,255,255,0.08)',
+                  background: selectedCat === cat ? 'rgba(0,210,190,0.12)' : 'rgba(255,255,255,0.03)',
+                  color: selectedCat === cat ? 'var(--primary)' : 'rgba(255,255,255,0.4)',
+                  transition: 'all 0.2s',
+                }}>{cat}</button>
               ))}
-            </select>
+            </div>
           </div>
 
-          {/* Tabla Única (Menu o Admin) */}
-          <div className="glass-card" style={{ flex: 1, overflowY: 'auto', background: 'rgba(10,12,15,0.4)', borderRadius: '16px', border: '1px solid rgba(0, 210, 190, 0.05)' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid rgba(0, 210, 190, 0.1)', color: 'var(--text-muted)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                  <th style={{ padding: '1.2rem' }}>Código</th>
-                  <th style={{ padding: '1.2rem' }}>Detalle del Producto</th>
-                  <th style={{ padding: '1.2rem' }}>Categoría</th>
-                  <th style={{ padding: '1.2rem', textAlign: 'center' }}>Stock</th>
-                  <th style={{ padding: '1.2rem', textAlign: 'right' }}>Precio Unitario</th>
-                  <th style={{ padding: '1.2rem', textAlign: 'center' }}>Acción</th>
+          {/* Table */}
+          <div style={{ flex: 1, overflowY: 'auto', background: 'rgba(10,12,15,0.5)', borderRadius: '14px', border: '1px solid rgba(0,210,190,0.06)' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead style={{ position: 'sticky', top: 0, background: '#0d0f14', zIndex: 1 }}>
+                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                  {['Código', 'Producto', 'Categoría', 'Stock', 'Precio', 'Acción'].map((h, i) => (
+                    <th key={h} style={{ padding: '10px 14px', fontSize: '0.6rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: '800', textAlign: i >= 3 ? 'center' : 'left' }}>{h}</th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {filteredProducts.map(prod => (
-                  <tr 
-                    key={prod.Id} 
-                    className="teal-glow-hover"
-                    style={{ borderBottom: '1px solid rgba(255,255,255,0.02)', transition: 'all 0.2s' }}
+                {filtered.length === 0 ? (
+                  <tr><td colSpan={6} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>Sin resultados</td></tr>
+                ) : filtered.map(prod => (
+                  <tr key={prod.Id} style={{ borderBottom: '1px solid rgba(255,255,255,0.025)', transition: 'background 0.15s' }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                   >
-                    <td style={{ padding: '1rem 1.2rem', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                      {prod.Codigo || '-'}
+                    <td style={{ padding: '9px 14px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>{prod.Codigo || '—'}</td>
+                    <td style={{ padding: '9px 14px', fontWeight: '600', color: '#fff', fontSize: '0.87rem', maxWidth: '200px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{prod.Nombre}</td>
+                    <td style={{ padding: '9px 14px' }}>
+                      <span style={{ fontSize: '0.62rem', background: 'rgba(0,210,190,0.08)', color: 'var(--primary)', padding: '3px 8px', borderRadius: '5px', fontWeight: '700', border: '1px solid rgba(0,210,190,0.12)' }}>{prod.CategoriaNombre}</span>
                     </td>
-                    <td style={{ padding: '1rem 1.2rem' }}>
-                      <div style={{ fontWeight: '600', color: '#fff', fontSize: '0.95rem' }}>{prod.Nombre}</div>
-                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{prod.RequierePreparacion ? 'Requiere Cocina' : 'Entrega Inmediata'}</div>
+                    <td style={{ padding: '9px 14px', textAlign: 'center', fontWeight: '700', fontSize: '0.85rem' }}>
+                      {prod.RequierePreparacion ? (
+                        <span style={{ color: 'var(--primary)', fontSize: '0.6rem', opacity: 0.8 }}>ILIMITADO</span>
+                      ) : (
+                        <span style={{ color: prod.StockActual <= prod.StockMinimo ? '#ef4444' : 'rgba(255,255,255,0.5)' }}>{prod.StockActual ?? 0}</span>
+                      )}
                     </td>
-                    <td style={{ padding: '1rem 1.2rem' }}>
-                      <span style={{ fontSize: '0.7rem', background: 'rgba(0, 210, 190, 0.08)', color: 'var(--primary)', padding: '4px 10px', borderRadius: '8px', fontWeight: '700', border: '1px solid rgba(0, 210, 190, 0.1)' }}>
-                        {prod.CategoriaNombre}
-                      </span>
+                    <td style={{ padding: '9px 14px', textAlign: 'center', fontWeight: '800', color: 'var(--primary)', fontSize: '0.9rem' }}>
+                      <span style={{ fontSize: '0.6rem', opacity: 0.5, marginRight: '3px' }}>Gs.</span>{prod.Precio.toLocaleString('es-PY')}
                     </td>
-                    <td style={{ padding: '1rem 1.2rem', textAlign: 'center', fontWeight: 'bold' }}>
-                      <span style={{ color: (prod.StockActual <= prod.StockMinimo) ? '#ff4d4d' : 'var(--text-muted)' }}>
-                        {prod.StockActual || 0}
-                      </span>
-                    </td>
-                    <td style={{ padding: '1rem 1.2rem', textAlign: 'right', fontWeight: '800', color: 'var(--primary)', fontSize: '1rem' }}>
-                      <span style={{ fontSize: '0.65rem', opacity: 0.6, marginRight: '4px' }}>Gs.</span>
-                      {prod.Precio.toLocaleString('es-PY')}
-                    </td>
-                    <td style={{ padding: '1rem 1.2rem', textAlign: 'center' }}>
+                    <td style={{ padding: '9px 14px', textAlign: 'center' }}>
                       {showAdmin ? (
-                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
-                          <button 
-                            onClick={() => openModal(prod)}
-                            style={{ background: 'rgba(0,210,190,0.1)', color: 'var(--primary)', border: 'none', padding: '6px', borderRadius: '6px', cursor: 'pointer', fontSize: '0.9rem' }}
-                          >
-                            ✏️
-                          </button>
-                          <button 
-                            onClick={() => handleDeleteProduct(prod.Id)}
-                            style={{ background: 'rgba(255,77,77,0.1)', color: 'var(--error)', border: 'none', padding: '6px', borderRadius: '6px', cursor: 'pointer', fontSize: '0.9rem' }}
-                          >
-                            🗑️
-                          </button>
+                        <div style={{ display: 'flex', gap: '5px', justifyContent: 'center' }}>
+                          <button onClick={() => openModal(prod)} style={{ background: 'rgba(0,210,190,0.1)', color: 'var(--primary)', border: 'none', padding: '5px 8px', borderRadius: '6px', cursor: 'pointer', fontSize: '0.8rem' }}>✏️</button>
+                          <button onClick={() => handleDelete(prod.Id)} style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: 'none', padding: '5px 8px', borderRadius: '6px', cursor: 'pointer', fontSize: '0.8rem' }}>🗑️</button>
                         </div>
                       ) : (
-                        <button 
+                        <button
                           onClick={() => addToCart(prod)}
-                          style={{ background: 'var(--primary)', color: '#000', border: 'none', width: '30px', height: '30px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', transition: 'transform 0.2s' }}
-                          onMouseEnter={(e) => e.target.style.transform = 'scale(1.1)'}
-                          onMouseLeave={(e) => e.target.style.transform = 'scale(1)'}
-                        >
-                          +
-                        </button>
+                          disabled={!prod.RequierePreparacion && prod.StockActual <= 0}
+                          style={{ 
+                            background: (!prod.RequierePreparacion && prod.StockActual <= 0) ? 'rgba(255,255,255,0.05)' : 'var(--primary)', 
+                            color: (!prod.RequierePreparacion && prod.StockActual <= 0) ? 'rgba(255,255,255,0.2)' : '#000', 
+                            border: 'none', width: '30px', height: '30px', borderRadius: '8px', fontWeight: '900', 
+                            cursor: (!prod.RequierePreparacion && prod.StockActual <= 0) ? 'not-allowed' : 'pointer', 
+                            fontSize: '1.1rem', transition: 'all 0.15s' 
+                          }}
+                        >+</button>
                       )}
                     </td>
                   </tr>
@@ -284,202 +311,122 @@ export default function Menu() {
           </div>
         </div>
 
-        {/* Lado Derecho: Ticket de Pedido (Solo visible si no estamos en Admin) */}
+        {/* RIGHT: Order Panel */}
         {!showAdmin && (
-          <div className="glass-card" style={{ width: '350px', display: 'flex', flexDirection: 'column', padding: '1.5rem', background: 'rgba(5,7,10,0.8)', border: '1px solid rgba(0, 210, 190, 0.1)', boxShadow: '0 20px 50px rgba(0,0,0,0.5)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-              <h3 style={{ color: 'var(--primary)', fontWeight: '800', fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <span style={{ fontSize: '1.5rem' }}>🧾</span> ORDEN ACTUAL
-              </h3>
-              <div style={{ background: 'rgba(255,255,255,0.05)', padding: '2px 10px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                <select 
-                  className="luxury-input" 
-                  value={selectedMesa} 
-                  onChange={(e) => setSelectedMesa(e.target.value)} 
-                  style={{ background: 'transparent', border: 'none', padding: '4px', fontSize: '0.85rem', fontWeight: 'bold', outline: 'none' }}
-                >
-                  {[1,2,3,4,5,6,7,8,9,10].map(m => <option key={m} value={m} style={{ background: '#000' }}>Mesa {m}</option>)}
+          <div style={{ width: '300px', minWidth: '280px', display: 'flex', flexDirection: 'column', background: 'rgba(8,10,14,0.8)', border: '1px solid rgba(0,210,190,0.1)', borderRadius: '18px', padding: '1.3rem', height: 'calc(100vh - 3rem)', position: 'sticky', top: '1.5rem' }}>
+            {/* Mesa selector */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+              <h3 style={{ color: 'var(--primary)', fontWeight: '800', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '7px' }}>🧾 Orden actual</h3>
+              <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '8px', padding: '3px 8px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                <select value={selectedMesa} onChange={e => setSelectedMesa(e.target.value)} style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '0.78rem', fontWeight: '700', outline: 'none', cursor: 'pointer' }}>
+                  {Array.from({ length: 12 }, (_, i) => i + 1).map(n => <option key={n} value={n} style={{ background: '#111' }}>Mesa {n}</option>)}
                 </select>
               </div>
             </div>
 
-            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '1.5rem', paddingRight: '5px' }}>
+            {/* Cart items */}
+            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '1rem' }}>
               {cart.length === 0 ? (
-                <div style={{ color: 'var(--text-muted)', textAlign: 'center', marginTop: '4rem', opacity: 0.3 }}>
-                  <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>📭</div>
-                  <p style={{ letterSpacing: '1px', fontWeight: 'bold', fontSize: '0.85rem' }}>CARRITO VACÍO</p>
+                <div style={{ textAlign: 'center', marginTop: '40%', color: 'rgba(255,255,255,0.15)' }}>
+                  <div style={{ fontSize: '2.5rem', marginBottom: '8px' }}>📭</div>
+                  <p style={{ fontSize: '0.72rem', fontWeight: '700', letterSpacing: '1px' }}>CARRITO VACÍO</p>
                 </div>
-              ) : (
-                cart.map(item => (
-                  <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)', padding: '12px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: '700', fontSize: '0.85rem', color: '#fff' }}>{item.nombre}</div>
-                      <div style={{ color: 'var(--primary)', fontSize: '0.75rem', fontWeight: 'bold', marginTop: '2px' }}>Gs. {item.precio.toLocaleString('es-PY')} × {item.cantidad}</div>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <span style={{ fontWeight: '800', fontSize: '0.9rem', color: '#fff' }}>Gs. {(item.precio * item.cantidad).toLocaleString('es-PY')}</span>
-                      <button onClick={() => removeFromCart(item.id)} style={{ background: 'rgba(255,77,77,0.15)', color: 'var(--error)', border: 'none', width: '24px', height: '24px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>×</button>
-                    </div>
+              ) : cart.map(item => (
+                <div key={item.id} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '9px 12px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '6px' }}>
+                    <span style={{ fontSize: '0.82rem', fontWeight: '700', color: '#fff', flex: 1, marginRight: '8px', wordBreak: 'break-word' }}>{item.nombre}</span>
+                    <span style={{ fontSize: '0.78rem', fontWeight: '800', color: 'var(--primary)', whiteSpace: 'nowrap' }}>Gs. {(item.precio * item.cantidad).toLocaleString('es-PY')}</span>
                   </div>
-                ))
-              )}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <button onClick={() => updateQty(item.id, -1)} style={{ width: '24px', height: '24px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.04)', color: '#fff', cursor: 'pointer', fontSize: '0.9rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>−</button>
+                    <span style={{ fontSize: '0.85rem', fontWeight: '800', color: '#fff', minWidth: '20px', textAlign: 'center' }}>{item.cantidad}</span>
+                    <button onClick={() => updateQty(item.id, 1)} style={{ width: '24px', height: '24px', borderRadius: '6px', border: '1px solid rgba(0,210,190,0.3)', background: 'rgba(0,210,190,0.08)', color: 'var(--primary)', cursor: 'pointer', fontSize: '0.9rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>+</button>
+                    <span style={{ fontSize: '0.68rem', color: 'rgba(255,255,255,0.3)', marginLeft: '4px' }}>× Gs. {item.precio.toLocaleString('es-PY')}</span>
+                  </div>
+                </div>
+              ))}
             </div>
 
-            <div style={{ borderTop: '2px dashed rgba(0, 210, 190, 0.2)', paddingTop: '1.5rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-                <span style={{ fontSize: '0.9rem', fontWeight: 'bold', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>Total Estimado:</span>
-                <span style={{ fontSize: '1.6rem', fontWeight: '900', color: 'var(--primary)', textShadow: '0 0 15px rgba(0,210,190,0.3)' }}>Gs. {total.toLocaleString('es-PY')}</span>
+            {/* Nota */}
+            {cart.length > 0 && (
+              <textarea
+                placeholder="Nota para cocina (opcional)..."
+                value={nota} onChange={e => setNota(e.target.value)}
+                style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '10px', padding: '8px 12px', color: '#fff', fontSize: '0.78rem', resize: 'none', height: '55px', outline: 'none', marginBottom: '10px', fontFamily: 'inherit' }}
+              />
+            )}
+
+            {/* Total + Confirm */}
+            <div style={{ borderTop: '1px dashed rgba(0,210,190,0.15)', paddingTop: '1rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <span style={{ fontSize: '0.78rem', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>Total</span>
+                <span style={{ fontSize: '1.3rem', fontWeight: '900', color: 'var(--primary)' }}>Gs. {total.toLocaleString('es-PY')}</span>
               </div>
-              
-              <button 
+              <button
                 onClick={enviarPedido}
-                disabled={cart.length === 0}
-                className="luxury-button" 
-                style={{ width: '100%', opacity: cart.length === 0 ? 0.3 : 1, background: 'var(--accent-gradient)', height: '50px', fontSize: '1rem', borderRadius: '12px', boxShadow: cart.length > 0 ? '0 10px 20px rgba(0,210,190,0.2)' : 'none' }}
+                disabled={cart.length === 0 || sending}
+                className="luxury-button"
+                style={{ width: '100%', background: cart.length > 0 ? 'var(--accent-gradient)' : 'rgba(255,255,255,0.05)', color: cart.length > 0 ? '#000' : 'rgba(255,255,255,0.2)', opacity: sending ? 0.7 : 1, fontSize: '0.8rem', padding: '12px', borderRadius: '10px' }}
               >
-                CONFIRMAR PEDIDO
+                {sending ? '⏳ Enviando...' : '🍳 CONFIRMAR PEDIDO'}
               </button>
             </div>
           </div>
         )}
 
-        {/* MODAL PARA AÑADIR/EDITAR PRODUCTO */}
+        {/* MODAL Producto */}
         {showModal && (
-          <div style={{
-            position: 'fixed',
-            top: 0, left: 0, right: 0, bottom: 0,
-            background: 'rgba(0,0,0,0.85)',
-            backdropFilter: 'blur(8px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1000,
-            animation: 'fadeIn 0.3s ease'
-          }}>
-            <div className="glass-card" style={{ 
-              width: '100%', 
-              maxWidth: '480px', 
-              padding: '2rem', 
-              background: '#0a0a0a', 
-              border: '1px solid var(--primary)',
-              boxShadow: '0 0 40px rgba(0,210,190,0.15)',
-              maxHeight: '90vh',
-              overflowY: 'auto'
-            }}>
-              <h2 style={{ color: 'var(--primary)', fontWeight: '800', marginBottom: '1.5rem', textAlign: 'center', fontSize: '1.3rem', letterSpacing: '1px' }}>
-                {editingProd ? 'EDITAR PRODUCTO' : 'NUEVO PRODUCTO'}
+          <div onClick={e => { if (e.target === e.currentTarget) setShowModal(false); }} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.87)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+            <div style={{ width: '480px', maxWidth: '95vw', background: '#0d0f14', border: '1px solid rgba(0,210,190,0.25)', borderRadius: '20px', padding: '2rem', boxShadow: '0 0 60px rgba(0,210,190,0.1)', maxHeight: '90vh', overflowY: 'auto' }}>
+              <h2 style={{ color: 'var(--primary)', fontWeight: '900', marginBottom: '1.5rem', textAlign: 'center', fontSize: '1.1rem', letterSpacing: '1px', textTransform: 'uppercase' }}>
+                {editingProd ? '✏️ Editar Producto' : '＋ Nuevo Producto'}
               </h2>
-              
-              <form onSubmit={handleSaveProduct} style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
-                <div>
-                  <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block', marginBottom: '6px', fontWeight: 'bold' }}>CÓDIGO (SKU)</label>
-                  <input 
-                    className="luxury-input" 
-                    placeholder="Ej: BEB-001" 
-                    value={formProd.codigo || ''} 
-                    onChange={e => setFormProd({...formProd, codigo: e.target.value})} 
-                    style={{ width: '100%', padding: '10px' }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block', marginBottom: '6px', fontWeight: 'bold' }}>NOMBRE DEL PRODUCTO *</label>
-                  <input 
-                    className="luxury-input" 
-                    placeholder="Ej: Bife de Chorizo" 
-                    value={formProd.nombre} 
-                    onChange={e => setFormProd({...formProd, nombre: e.target.value})} 
-                    style={{ width: '100%', padding: '10px' }}
-                    required 
-                  />
-                </div>
-
-                <div style={{ display: 'flex', gap: '1rem' }}>
-                  <div style={{ flex: 1 }}>
-                    <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block', marginBottom: '6px', fontWeight: 'bold' }}>PRECIO (GS) *</label>
-                    <input 
-                      className="luxury-input" 
-                      type="number" 
-                      placeholder="0" 
-                      value={formProd.precio} 
-                      onChange={e => setFormProd({...formProd, precio: e.target.value})} 
-                      style={{ width: '100%', padding: '10px' }}
-                      required 
-                    />
+              <form onSubmit={handleSaveProduct} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                {[
+                  { label: 'Código (SKU)', key: 'codigo', placeholder: 'Ej: BEB-001', type: 'text' },
+                  { label: 'Nombre del Producto *', key: 'nombre', placeholder: 'Ej: Bife de Chorizo', type: 'text', required: true },
+                ].map(f => (
+                  <div key={f.key}>
+                    <label style={{ fontSize: '0.65rem', color: 'var(--text-muted)', display: 'block', marginBottom: '5px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '1px' }}>{f.label}</label>
+                    <input className="luxury-input" type={f.type} placeholder={f.placeholder} value={formProd[f.key]} onChange={e => setFormProd({ ...formProd, [f.key]: e.target.value })} style={{ width: '100%', padding: '10px 14px', fontSize: '0.9rem' }} required={f.required} />
                   </div>
-                  <div style={{ flex: 1 }}>
-                    <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block', marginBottom: '6px', fontWeight: 'bold' }}>CATEGORÍA *</label>
-                    <select 
-                      className="luxury-input" 
-                      value={formProd.categoriaId} 
-                      onChange={e => setFormProd({...formProd, categoriaId: e.target.value})}
-                      style={{ width: '100%', cursor: 'pointer', padding: '10px' }}
-                      required
-                    >
-                      <option value="" disabled>Seleccione</option>
-                      {categories.map(cat => (
-                        <option key={cat.Id} value={cat.Id} style={{ background: '#000' }}>{cat.Nombre}</option>
-                      ))}
+                ))}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <div>
+                    <label style={{ fontSize: '0.65rem', color: 'var(--text-muted)', display: 'block', marginBottom: '5px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '1px' }}>Precio (Gs) *</label>
+                    <input className="luxury-input" type="number" placeholder="0" value={formProd.precio} onChange={e => setFormProd({ ...formProd, precio: e.target.value })} style={{ width: '100%', padding: '10px 14px', fontSize: '0.9rem' }} required />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '0.65rem', color: 'var(--text-muted)', display: 'block', marginBottom: '5px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '1px' }}>Categoría *</label>
+                    <select className="luxury-input" value={formProd.categoriaId} onChange={e => setFormProd({ ...formProd, categoriaId: e.target.value })} style={{ width: '100%', padding: '10px 14px', fontSize: '0.9rem', cursor: 'pointer' }} required>
+                      <option value="">Seleccione</option>
+                      {categories.map(c => <option key={c.Id} value={c.Id} style={{ background: '#000' }}>{c.Nombre}</option>)}
                     </select>
                   </div>
                 </div>
-
-                <div style={{ display: 'flex', gap: '1rem' }}>
-                  <div style={{ flex: 1 }}>
-                    <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block', marginBottom: '6px', fontWeight: 'bold' }}>STOCK ACTUAL</label>
-                    <input 
-                      className="luxury-input" 
-                      type="number" 
-                      placeholder="0" 
-                      value={formProd.stockActual || ''} 
-                      onChange={e => setFormProd({...formProd, stockActual: e.target.value})} 
-                      style={{ width: '100%', padding: '10px' }}
-                    />
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <div>
+                    <label style={{ fontSize: '0.65rem', color: 'var(--text-muted)', display: 'block', marginBottom: '5px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '1px' }}>Stock Actual</label>
+                    <input className="luxury-input" type="number" placeholder="0" value={formProd.stockActual} onChange={e => setFormProd({ ...formProd, stockActual: e.target.value })} style={{ width: '100%', padding: '10px 14px', fontSize: '0.9rem' }} />
                   </div>
-                  <div style={{ flex: 1 }}>
-                    <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block', marginBottom: '6px', fontWeight: 'bold' }}>STOCK MÍNIMO (ALERTA)</label>
-                    <input 
-                      className="luxury-input" 
-                      type="number" 
-                      placeholder="0" 
-                      value={formProd.stockMinimo || ''} 
-                      onChange={e => setFormProd({...formProd, stockMinimo: e.target.value})} 
-                      style={{ width: '100%', padding: '10px' }}
-                    />
+                  <div>
+                    <label style={{ fontSize: '0.65rem', color: 'var(--text-muted)', display: 'block', marginBottom: '5px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '1px' }}>Stock Mínimo</label>
+                    <input className="luxury-input" type="number" placeholder="0" value={formProd.stockMinimo} onChange={e => setFormProd({ ...formProd, stockMinimo: e.target.value })} style={{ width: '100%', padding: '10px 14px', fontSize: '0.9rem' }} />
                   </div>
                 </div>
-
-                <label style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '0.85rem', cursor: 'pointer', color: '#fff', userSelect: 'none', marginTop: '0.5rem' }}>
-                  <input 
-                    type="checkbox" 
-                    checked={formProd.requierePreparacion} 
-                    onChange={e => setFormProd({...formProd, requierePreparacion: e.target.checked})}
-                    style={{ width: '18px', height: '18px', accentColor: 'var(--primary)' }}
-                  />
-                  Requiere Preparación (Cocina)
+                <label style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '0.85rem', color: '#fff', cursor: 'pointer', userSelect: 'none' }}>
+                  <input type="checkbox" checked={!!formProd.requierePreparacion} onChange={e => setFormProd({ ...formProd, requierePreparacion: e.target.checked })} style={{ width: '16px', height: '16px', accentColor: 'var(--primary)' }} />
+                  Requiere preparación en cocina (Stock ilimitado)
                 </label>
-
-                <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem' }}>
-                  <button type="button" onClick={() => setShowModal(false)} className="luxury-button" style={{ flex: 1, background: 'rgba(255,255,255,0.05)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)', padding: '12px' }}>
-                    CANCELAR
-                  </button>
-                  <button type="submit" className="luxury-button" style={{ flex: 1, background: 'var(--accent-gradient)', color: '#000', padding: '12px' }}>
-                    {editingProd ? 'ACTUALIZAR' : 'GUARDAR'}
-                  </button>
+                <div style={{ display: 'flex', gap: '10px', marginTop: '0.5rem' }}>
+                  <button type="button" onClick={() => setShowModal(false)} className="luxury-button" style={{ flex: 1, background: 'rgba(255,255,255,0.05)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)', padding: '11px' }}>Cancelar</button>
+                  <button type="submit" className="luxury-button" style={{ flex: 1, background: 'var(--accent-gradient)', color: '#000', padding: '11px' }}>{editingProd ? 'Actualizar' : 'Guardar'}</button>
                 </div>
               </form>
             </div>
           </div>
         )}
-
       </main>
-
-      <style jsx>{`
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(-20px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-      `}</style>
     </div>
   );
 }

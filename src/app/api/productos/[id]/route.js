@@ -3,7 +3,8 @@ import { getPool, sql } from '@/lib/db';
 
 export async function PUT(request, { params }) {
   try {
-    const { id } = params;
+    const resolvedParams = await params;
+    const { id } = resolvedParams;
     const { codigo, nombre, precio, categoriaId, requierePreparacion, stockActual, stockMinimo } = await request.json();
     const pool = await getPool();
 
@@ -35,7 +36,8 @@ export async function PUT(request, { params }) {
 
 export async function DELETE(request, { params }) {
   try {
-    const { id } = params;
+    const resolvedParams = await params;
+    const { id } = resolvedParams;
     const pool = await getPool();
     await pool.request()
       .input('id', sql.Int, id)
