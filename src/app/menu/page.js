@@ -63,6 +63,16 @@ export default function Menu() {
   };
 
   const updateQty = (id, delta) => {
+    if (delta > 0) {
+      const prod = products.find(p => p.Id === id);
+      if (prod && !prod.RequierePreparacion) {
+        const item = cart.find(i => i.id === id);
+        if (item && item.cantidad >= prod.StockActual) {
+          alert(`Stock insuficiente. Solo hay ${prod.StockActual} unidades disponibles.`);
+          return;
+        }
+      }
+    }
     setCart(prev => prev
       .map(i => i.id === id ? { ...i, cantidad: i.cantidad + delta } : i)
       .filter(i => i.cantidad > 0)
@@ -83,21 +93,35 @@ export default function Menu() {
       const raw = localStorage.getItem('restaurante_pedidos');
       let pedidos = raw ? JSON.parse(raw) : [];
 
-      // Determine new state: if any item in the cart needs prep, it goes to Pendiente.
-      // If none need prep, it goes to Listo (direct to delivery).
-      const needsPrep = cart.some(i => i.requierePreparacion);
-      const newState = needsPrep ? 'Pendiente' : 'Listo';
+      // Split the cart into items that require preparation and items that are ready immediately
+      const prepItems = cart.filter(i => i.requierePreparacion);
+      const readyItems = cart.filter(i => !i.requierePreparacion);
+      const baseId = Date.now();
 
-      // Always create a NEW order entry for each "batch"
-      pedidos.push({
-        id: Date.now().toString().slice(-5),
-        mesa: mesaLabel,
-        fecha: new Date().toLocaleString('es-PY'),
-        items: cart.map(i => ({ ...i })),
-        nota: nota,
-        mesero: u.nombre || 'Mesero',
-        estado: newState,
-      });
+      if (prepItems.length > 0) {
+        pedidos.push({
+          id: baseId.toString().slice(-5),
+          mesa: mesaLabel,
+          fecha: new Date().toLocaleString('es-PY'),
+          items: prepItems.map(i => ({ ...i })),
+          nota: nota,
+          mesero: u.nombre || 'Mesero',
+          estado: 'Pendiente',
+        });
+      }
+
+      if (readyItems.length > 0) {
+        // Offset ID by 1 to prevent collisions if both are submitted together
+        pedidos.push({
+          id: (baseId + 1).toString().slice(-5),
+          mesa: mesaLabel,
+          fecha: new Date().toLocaleString('es-PY'),
+          items: readyItems.map(i => ({ ...i })),
+          nota: prepItems.length > 0 ? '' : nota, // assign note to kitchen order if mixed
+          mesero: u.nombre || 'Mesero',
+          estado: 'Listo',
+        });
+      }
 
       localStorage.setItem('restaurante_pedidos', JSON.stringify(pedidos));
 

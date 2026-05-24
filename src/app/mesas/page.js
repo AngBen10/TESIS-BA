@@ -11,8 +11,7 @@ const INITIAL_MESAS = Array.from({ length: 12 }, (_, i) => ({
   estado: 'Disponible',
   pedidoActivo: false,
   limpiezaFinAt: null,
-  reservaAt: null,
-  nombreReserva: '',
+  reservas: [],
 }));
 
 const STATE_CONFIG = {
@@ -29,6 +28,7 @@ export default function Mesas() {
   const [selectedMesa, setSelectedMesa] = useState(null);
   const [showCobrarModal, setShowCobrarModal] = useState(false);
   const [showReservaInputs, setShowReservaInputs] = useState(false);
+  const [showReservasList, setShowReservasList] = useState(false);
   
   // Tick to force re-render every second for timers
   const [, setTick] = useState(0);
@@ -46,7 +46,27 @@ export default function Mesas() {
 
   const loadData = useCallback(() => {
     const storedMesas = localStorage.getItem('restaurante_mesas');
-    setMesas(storedMesas ? JSON.parse(storedMesas) : INITIAL_MESAS);
+    let loadedMesas = storedMesas ? JSON.parse(storedMesas) : INITIAL_MESAS;
+    
+    // Migrate old reservations format to array format if needed
+    loadedMesas = loadedMesas.map(m => {
+      const u = { ...m };
+      if (!u.reservas) {
+        u.reservas = [];
+        if (u.reservaAt) {
+          u.reservas.push({
+            id: Date.now() + Math.random(),
+            timestamp: u.reservaAt,
+            nombre: u.nombreReserva || 'Reserva anterior'
+          });
+        }
+        delete u.reservaAt;
+        delete u.nombreReserva;
+      }
+      return u;
+    });
+
+    setMesas(loadedMesas);
     const storedPedidos = localStorage.getItem('restaurante_pedidos');
     setPedidos(storedPedidos ? JSON.parse(storedPedidos) : []);
   }, []);
@@ -70,6 +90,13 @@ export default function Mesas() {
     if (mesas.length > 0) localStorage.setItem('restaurante_mesas', JSON.stringify(mesas));
   }, [mesas]);
 
+  useEffect(() => {
+    if (!selectedMesa) {
+      setShowReservaInputs(false);
+      setShowReservasList(false);
+    }
+  }, [selectedMesa]);
+
   // Master Timer Loop (Background check + Re-render trigger)
   useEffect(() => {
     const timer = setInterval(() => {
@@ -89,23 +116,29 @@ export default function Mesas() {
             }
           }
 
+          const reservas = updatedM.reservas || [];
+
           // 2. Reservation logic (Automate to 'Reservada' 3 hours before)
-          if (m.reservaAt && m.estado === 'Disponible') {
-            const tresHoras = 3 * 3600 * 1000;
-            if (Date.now() >= (m.reservaAt - tresHoras)) {
-              changed = true;
-              updatedM.estado = 'Reservada';
-            }
+          const tresHoras = 3 * 3600 * 1000;
+          const now = Date.now();
+          const hasSoonReservation = reservas.some(r => now >= (r.timestamp - tresHoras) && now <= r.timestamp);
+
+          if (hasSoonReservation && updatedM.estado === 'Disponible') {
+            changed = true;
+            updatedM.estado = 'Reservada';
           }
           
           // 3. Clear old reservations (1 hour after time)
-          if (m.reservaAt && Date.now() > m.reservaAt + (1 * 3600 * 1000)) {
-              if (m.estado === 'Reservada' || m.estado === 'Disponible') {
-                  changed = true;
-                  updatedM.reservaAt = null;
-                  updatedM.nombreReserva = '';
-                  if (m.estado === 'Reservada') updatedM.estado = 'Disponible';
-              }
+          const validReservas = reservas.filter(r => now <= r.timestamp + (1 * 3600 * 1000));
+          if (validReservas.length !== reservas.length) {
+            changed = true;
+            updatedM.reservas = validReservas;
+            
+            // If the table was in 'Reservada' state but now has no soon reservations, set it back to 'Disponible'
+            const stillHasSoon = validReservas.some(r => now >= (r.timestamp - tresHoras) && now <= r.timestamp);
+            if (!stillHasSoon && updatedM.estado === 'Reservada') {
+              updatedM.estado = 'Disponible';
+            }
           }
 
           return updatedM;
@@ -138,25 +171,85 @@ export default function Mesas() {
     setSelectedMesa(sel);
   };
 
-  const programarReserva = () => {
-    if (!reservaFecha || !reservaHora || !reservaNombre) return;
-    const dt = new Date(`${reservaFecha}T${reservaHora}`);
-    if (isNaN(dt.getTime())) return;
+  const getSoonReservation = (mesa) => {
+    if (!mesa.reservas || mesa.reservas.length === 0) return null;
+    const now = Date.now();
+    const tresHoras = 3 * 3600 * 1000;
+    return mesa.reservas.find(r => now >= (r.timestamp - tresHoras) && now <= r.timestamp + (1 * 3600 * 1000));
+  };
 
-    const updated = mesas.map(m => 
-      m.id === selectedMesa.id ? { ...m, reservaAt: dt.getTime(), nombreReserva: reservaNombre } : m
-    );
+  const programarReserva = () => {
+    if (!reservaFecha || !reservaHora || !reservaNombre) {
+      alert("Por favor completa todos los campos (Nombre, Fecha y Hora).");
+      return;
+    }
+    const dt = new Date(`${reservaFecha}T${reservaHora}`);
+    if (isNaN(dt.getTime())) {
+      alert("Fecha u hora inválida.");
+      return;
+    }
+    const newTimestamp = dt.getTime();
+    
+    if (newTimestamp < Date.now() - 10 * 60 * 1000) {
+      alert("No puedes programar una reserva en el pasado.");
+      return;
+    }
+
+    const conflictWindow = 2 * 3600 * 1000; // Rango de 2 horas de conflicto
+    const currentReservations = selectedMesa.reservas || [];
+    const hasConflict = currentReservations.some(r => Math.abs(r.timestamp - newTimestamp) < conflictWindow);
+    
+    if (hasConflict) {
+      alert("Error: Ya existe una reserva para esta mesa en un horario cercano (rango de 2 horas). Por favor elige otro horario.");
+      return;
+    }
+
+    const newReserva = {
+      id: Date.now() + Math.random(),
+      timestamp: newTimestamp,
+      nombre: reservaNombre
+    };
+    
+    const updatedReservas = [...currentReservations, newReserva].sort((a, b) => a.timestamp - b.timestamp);
+
+    const updated = mesas.map(m => {
+      if (m.id !== selectedMesa.id) return m;
+      
+      const u = { ...m, reservas: updatedReservas };
+      const now = Date.now();
+      const tresHoras = 3 * 3600 * 1000;
+      const hasSoon = updatedReservas.some(r => now >= (r.timestamp - tresHoras) && now <= r.timestamp);
+      if (hasSoon && u.estado === 'Disponible') {
+        u.estado = 'Reservada';
+      }
+      return u;
+    });
+
     setMesas(updated);
     const sel = updated.find(m => m.id === selectedMesa.id);
     setSelectedMesa(sel);
     setShowReservaInputs(false);
+    setShowReservasList(true);
     setReservaFecha(''); setReservaHora(''); setReservaNombre('');
   };
 
-  const cancelarReserva = () => {
-    const updated = mesas.map(m => 
-      m.id === selectedMesa.id ? { ...m, reservaAt: null, nombreReserva: '', estado: m.estado === 'Reservada' ? 'Disponible' : m.estado } : m
-    );
+  const eliminarReservaEspecifica = (reservaId) => {
+    const currentReservas = selectedMesa.reservas || [];
+    const updatedReservas = currentReservas.filter(r => r.id !== reservaId);
+    
+    const updated = mesas.map(m => {
+      if (m.id !== selectedMesa.id) return m;
+      
+      const u = { ...m, reservas: updatedReservas };
+      const now = Date.now();
+      const tresHoras = 3 * 3600 * 1000;
+      const hasSoon = updatedReservas.some(r => now >= (r.timestamp - tresHoras) && now <= r.timestamp);
+      if (!hasSoon && u.estado === 'Reservada') {
+        u.estado = 'Disponible';
+      }
+      return u;
+    });
+
     setMesas(updated);
     const sel = updated.find(m => m.id === selectedMesa.id);
     setSelectedMesa(sel);
@@ -210,7 +303,9 @@ export default function Mesas() {
   };
 
   const isReady = (mesaNum) => {
-    return pedidos.some(p => p.mesa === `Mesa ${mesaNum}` && p.estado === 'Listo');
+    const active = pedidos.filter(p => p.mesa === `Mesa ${mesaNum}` && p.estado !== 'Pagado' && p.estado !== 'Entregado');
+    if (active.length === 0) return false;
+    return active.every(p => p.estado === 'Listo');
   };
 
   const mesasFiltradas = filterEstado === 'Todas' ? mesas : mesas.filter(m => m.estado === filterEstado);
@@ -322,11 +417,16 @@ export default function Mesas() {
                   <div style={{ fontSize: '0.75rem', color: 'var(--primary)', fontWeight: '700' }}>
                     ⏳ {formatTimeRemaining(mesa.limpiezaFinAt)}
                   </div>
-                ) : mesa.reservaAt && mesa.estado !== 'Ocupada' ? (
-                   <div style={{ textAlign: 'center' }}>
-                     <div style={{ fontSize: '0.65rem', color: '#f59e0b', fontWeight: '800' }}>📅 {new Date(mesa.reservaAt).toLocaleTimeString('es-PY', { hour: '2-digit', minute: '2-digit' })}</div>
-                     <div style={{ fontSize: '0.55rem', color: 'rgba(255,255,255,0.4)', fontWeight: '700', textTransform: 'uppercase' }}>{mesa.nombreReserva}</div>
-                   </div>
+                ) : getSoonReservation(mesa) && mesa.estado !== 'Ocupada' ? (
+                   (() => {
+                     const soon = getSoonReservation(mesa);
+                     return (
+                       <div style={{ textAlign: 'center' }}>
+                         <div style={{ fontSize: '0.65rem', color: '#f59e0b', fontWeight: '800' }}>📅 {new Date(soon.timestamp).toLocaleTimeString('es-PY', { hour: '2-digit', minute: '2-digit', hour12: false })} hs</div>
+                         <div style={{ fontSize: '0.55rem', color: 'rgba(255,255,255,0.4)', fontWeight: '700', textTransform: 'uppercase' }}>{soon.nombre}</div>
+                       </div>
+                     );
+                   })()
                 ) : pending ? (
                   <div style={{
                     display: 'flex', alignItems: 'center', gap: '5px',
@@ -411,32 +511,108 @@ export default function Mesas() {
               </div>
 
               <div style={{ background: 'rgba(245,158,11,0.03)', border: '1px solid rgba(245,158,11,0.15)', borderRadius: '14px', padding: '1.2rem', marginBottom: '1.5rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                   <p style={{ fontSize: '0.75rem', color: '#f59e0b', fontWeight: '800', textTransform: 'uppercase' }}>📅 Reserva Programada</p>
-                   {selectedMesa.reservaAt && (
-                     <button onClick={cancelarReserva} style={{ background: 'transparent', border: 'none', color: '#ef4444', fontSize: '0.6rem', fontWeight: '800', cursor: 'pointer' }}>ELIMINAR RESERVA</button>
-                   )}
+                <div 
+                  onClick={() => setShowReservasList(!showReservasList)}
+                  style={{ 
+                    display: 'flex', 
+                    justifyContent: 'space-between', 
+                    alignItems: 'center', 
+                    cursor: 'pointer', 
+                    userSelect: 'none',
+                    marginBottom: showReservasList ? '12px' : '0px'
+                  }}
+                >
+                  <p style={{ fontSize: '0.75rem', color: '#f59e0b', fontWeight: '800', textTransform: 'uppercase', margin: 0 }}>
+                    📅 Reservas de la Mesa {selectedMesa.reservas?.length > 0 ? `(${selectedMesa.reservas.length})` : ''}
+                  </p>
+                  <span style={{ fontSize: '0.75rem', color: '#f59e0b', fontWeight: '800' }}>
+                    {showReservasList ? '▲ Ocultar' : '▼ Mostrar'}
+                  </span>
                 </div>
-                
-                {selectedMesa.reservaAt ? (
-                  <div style={{ color: '#fff', fontSize: '0.9rem', fontWeight: '700' }}>
-                    {new Date(selectedMesa.reservaAt).toLocaleString('es-PY', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                    <div style={{ fontSize: '0.75rem', color: '#f59e0b', marginTop: '4px' }}>A nombre de: {selectedMesa.nombreReserva}</div>
+
+                {showReservasList && (
+                  <div style={{ borderTop: '1px solid rgba(245,158,11,0.1)', paddingTop: '12px', marginTop: '4px' }}>
+                    {selectedMesa.reservas && selectedMesa.reservas.length > 0 ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
+                        {selectedMesa.reservas.map((res) => (
+                          <div key={res.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.03)', padding: '8px 12px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                            <div>
+                              <div style={{ fontSize: '0.8rem', color: '#fff', fontWeight: '700' }}>
+                                {new Date(res.timestamp).toLocaleDateString('es-PY')} - {new Date(res.timestamp).toLocaleTimeString('es-PY', { hour: '2-digit', minute: '2-digit', hour12: false })} hs
+                              </div>
+                              <div style={{ fontSize: '0.7rem', color: '#f59e0b', fontWeight: '600' }}>
+                                A nombre de: {res.nombre}
+                              </div>
+                            </div>
+                            <button 
+                              onClick={() => eliminarReservaEspecifica(res.id)} 
+                              style={{ background: 'transparent', border: 'none', color: '#ef4444', fontSize: '0.65rem', fontWeight: '800', cursor: 'pointer', padding: '4px' }}
+                            >
+                              ✕ Eliminar
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.4)', margin: '0 0 12px 0' }}>
+                        No hay reservas programadas para esta mesa.
+                      </p>
+                    )}
                   </div>
-                ) : showReservaInputs ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    <input type="text" placeholder="Nombre de quien reserva..." value={reservaNombre} onChange={e => setReservaNombre(e.target.value)} className="luxury-input" style={{ width: '100%', padding: '8px' }} />
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                      <input type="date" value={reservaFecha} onChange={e => setReservaFecha(e.target.value)} className="luxury-input" style={{ padding: '8px' }} />
-                      <input type="time" value={reservaHora} onChange={e => setReservaHora(e.target.value)} className="luxury-input" style={{ padding: '8px' }} />
+                )}
+
+                {showReservaInputs ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '12px' }}>
+                    <p style={{ fontSize: '0.7rem', color: '#f59e0b', fontWeight: '700', textTransform: 'uppercase', margin: 0 }}>Nueva Reserva</p>
+                    <input 
+                      type="text" 
+                      placeholder="Nombre de quien reserva..." 
+                      value={reservaNombre} 
+                      onChange={e => setReservaNombre(e.target.value)} 
+                      className="luxury-input" 
+                      style={{ width: '100%', padding: '8px' }} 
+                    />
+                    <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '8px' }}>
+                      <input 
+                        type="date" 
+                        value={reservaFecha} 
+                        onChange={e => setReservaFecha(e.target.value)} 
+                        className="luxury-input" 
+                        style={{ padding: '8px' }} 
+                      />
+                      <input 
+                        type="time" 
+                        value={reservaHora} 
+                        onChange={e => setReservaHora(e.target.value)} 
+                        className="luxury-input" 
+                        style={{ padding: '8px', color: '#fff', background: '#0d0f14', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px' }}
+                      />
                     </div>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button onClick={() => setShowReservaInputs(false)} style={{ flex: 1, padding: '8px', background: 'rgba(255,255,255,0.05)', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '0.7rem' }}>Cancelar</button>
-                      <button onClick={programarReserva} style={{ flex: 1, padding: '8px', background: '#f59e0b', color: '#000', border: 'none', borderRadius: '8px', fontSize: '0.7rem', fontWeight: '800' }}>Confirmar</button>
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                      <button 
+                        onClick={() => {
+                          setShowReservaInputs(false);
+                          setReservaFecha('');
+                          setReservaHora('');
+                          setReservaNombre('');
+                        }} 
+                        style={{ flex: 1, padding: '8px', background: 'rgba(255,255,255,0.05)', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '0.7rem', cursor: 'pointer' }}
+                      >
+                        Cancelar
+                      </button>
+                      <button 
+                        onClick={programarReserva} 
+                        style={{ flex: 1, padding: '8px', background: '#f59e0b', color: '#000', border: 'none', borderRadius: '8px', fontSize: '0.7rem', fontWeight: '800', cursor: 'pointer' }}
+                      >
+                        Confirmar
+                      </button>
                     </div>
                   </div>
                 ) : (
-                  <button onClick={() => setShowReservaInputs(true)} style={{ width: '100%', padding: '10px', background: 'rgba(245,158,11,0.1)', color: '#f59e0b', border: '1px dashed #f59e0b', borderRadius: '10px', fontSize: '0.75rem', fontWeight: '700', cursor: 'pointer' }}>
+                  <button 
+                    onClick={() => setShowReservaInputs(true)} 
+                    style={{ width: '100%', padding: '10px', background: 'rgba(245,158,11,0.1)', color: '#f59e0b', border: '1px dashed #f59e0b', borderRadius: '10px', fontSize: '0.75rem', fontWeight: '700', cursor: 'pointer' }}
+                  >
                     ＋ Programar Nueva Reserva
                   </button>
                 )}
@@ -467,7 +643,7 @@ export default function Mesas() {
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
                 <button onClick={() => { setSelectedMesa(null); router.push(`/menu?mesa=${selectedMesa.numero}`); }} style={{ padding: '13px', fontSize: '0.75rem', fontWeight: '800', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '7px', background: 'var(--primary)', color: '#000', border: 'none', borderRadius: '12px', cursor: 'pointer' }}>＋ AÑADIR PRODUCTO</button>
-                <button onClick={() => setShowCobrarModal(true)} style={{ padding: '13px', fontSize: '0.75rem', fontWeight: '800', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '7px', background: 'rgba(255,255,255,0.05)', color: 'var(--primary)', border: '1px solid rgba(0,210,190,0.3)', borderRadius: '12px', cursor: 'pointer' }}>💳 COBRAR MESA</button>
+                <button onClick={() => { setSelectedMesa(null); router.push(`/caja?mesa=${selectedMesa.numero}`); }} style={{ padding: '13px', fontSize: '0.75rem', fontWeight: '800', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '7px', background: 'rgba(255,255,255,0.05)', color: 'var(--primary)', border: '1px solid rgba(0,210,190,0.3)', borderRadius: '12px', cursor: 'pointer' }}>💳 COBRAR MESA</button>
               </div>
               <button onClick={() => setSelectedMesa(null)} style={{ width: '100%', padding: '11px', fontSize: '0.75rem', fontWeight: '700', background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.45)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', cursor: 'pointer' }}>CERRAR</button>
             </div>

@@ -126,6 +126,43 @@ export default function Sidebar({ user }) {
             </div>
           );
         })}
+
+        {/* Módulo SIFEN para el Administrador */}
+        {user && user.roleId === 1 && (
+          <>
+            <p style={{
+              fontSize: '0.55rem', color: 'var(--text-muted)', fontWeight: '700',
+              marginTop: '1.2rem', marginBottom: '6px', paddingLeft: '0.6rem', letterSpacing: '2px'
+            }}>SISTEMA</p>
+            <div
+              onClick={() => router.push('/admin/sifen')}
+              style={{
+                padding: '0.55rem 0.8rem',
+                borderRadius: '10px',
+                background: pathname === '/admin/sifen'
+                  ? 'linear-gradient(90deg, rgba(0, 210, 190, 0.18) 0%, transparent 100%)'
+                  : 'transparent',
+                color: pathname === '/admin/sifen' ? '#fff' : 'rgba(255,255,255,0.38)',
+                fontWeight: pathname === '/admin/sifen' ? '700' : '500',
+                fontSize: '0.75rem',
+                borderLeft: pathname === '/admin/sifen' ? '3px solid var(--primary)' : '3px solid transparent',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                transition: 'all 0.25s ease',
+              }}
+            >
+              <span style={{ fontSize: '0.8rem', opacity: pathname === '/admin/sifen' ? 1 : 0.5 }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                </svg>
+              </span>
+              Configuración SIFEN
+            </div>
+          </>
+        )}
       </nav>
 
       {/* Spacer */}

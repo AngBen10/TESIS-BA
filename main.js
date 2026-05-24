@@ -12,10 +12,11 @@ function createWindow() {
       nodeIntegration: true,
       contextIsolation: false,
     },
-    // Ocultar barra de menú por defecto para look de escritorio limpio
     autoHideMenuBar: true,
     icon: path.join(__dirname, 'public', 'favicon.ico')
   });
+
+  win.maximize();
 
   // En desarrollo, cargar la URL de Next.js. En producción, cargar el build estático.
   const url = isDev 
