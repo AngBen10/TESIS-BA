@@ -27,6 +27,7 @@ export default function CajaPage() {
   const [metodoPago, setMetodoPago]       = useState('Efectivo');
 
   // Estado de la emisión
+  const [tipoComprobante, setTipoComprobante] = useState('electronica'); // 'electronica' | 'normal'
   const [emitiendo, setEmitiendo]   = useState(false);
   const [resultado, setResultado]   = useState(null); // { ok, factura }
   const [error, setError]           = useState('');
@@ -130,7 +131,7 @@ export default function CajaPage() {
   const cargarProductos = async () => {
     try {
       const r = await fetch('/api/productos');
-      if (r.ok) { const d = await r.json(); setProductos(d.productos || []); }
+      if (r.ok) { const d = await r.json(); setProductos(Array.isArray(d) ? d : (d.productos || [])); }
     } catch (_) {}
   };
 
@@ -144,7 +145,25 @@ export default function CajaPage() {
       setLoadingRuc(true);
       try {
         const r = await fetch(`/api/facturacion/buscar-ruc?q=${encodeURIComponent(val)}`);
-        if (r.ok) { const d = await r.json(); setSugerencias(d.resultados || []); }
+        if (r.ok) {
+          const d = await r.json();
+          const resultados = d.resultados || [];
+          setSugerencias(resultados);
+
+          // AUTO-SELECCIÓN: Si el RUC ingresado coincide exactamente con un resultado (con o sin DV),
+          // autocompletar la Razón Social y el RUC de inmediato de forma transparente.
+          const cleanInput = val.trim().replace(/-/g, '');
+          const exactMatch = resultados.find(c => 
+            c.ruc === cleanInput || 
+            c.rucCompleto === val.trim() ||
+            c.rucCompleto.replace(/-/g, '') === cleanInput
+          );
+          if (exactMatch) {
+            setRucInput(exactMatch.rucCompleto);
+            setRazonSocial(exactMatch.razonSocial);
+            setSugerencias([]); // Ocultar dropdown de sugerencias al emparejarse
+          }
+        }
       } catch (_) {} finally { setLoadingRuc(false); }
     }, 350);
   };
@@ -222,7 +241,8 @@ export default function CajaPage() {
           rucCliente:    rucInput || 'X',
           nombreCliente: razonSocial,
           metodoPago,
-          cajeroId:      user.id
+          cajeroId:      user.id,
+          isElectronica: tipoComprobante === 'electronica'
         })
       });
 
@@ -450,16 +470,43 @@ export default function CajaPage() {
 
               {/* Razón Social resuelta */}
               <div style={{ background: 'rgba(0,210,190,0.05)', border: '1px solid rgba(0,210,190,0.15)', borderRadius: '8px', padding: '8px 12px', marginTop: '8px' }}>
-                <p style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginBottom: '2px' }}>CLIENTE IDENTIFICADO</p>
-                <p style={{ fontSize: '0.85rem', fontWeight: '700', color: '#fff' }}>{razonSocial}</p>
+                <p style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginBottom: '2px' }}>CLIENTE (EDITABLE)</p>
+                <input 
+                  value={razonSocial} 
+                  onChange={e => setRazonSocial(e.target.value)}
+                  style={{ width: '100%', background: 'transparent', border: 'none', color: '#fff', fontSize: '0.85rem', fontWeight: '700', outline: 'none', padding: '2px 0' }}
+                />
               </div>
             </div>
 
-            {/* Email */}
+            {/* Tipo de Comprobante */}
             <div style={cardStyle}>
-              <label style={labelStyle}>Correo para envío de factura</label>
-              <input type="email" value={emailCliente} onChange={e => setEmailCliente(e.target.value)} placeholder="cliente@ejemplo.com (opcional)" style={inputStyle} />
+              <p style={labelStyle}>Tipo de Comprobante</p>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button onClick={() => setTipoComprobante('electronica')}
+                  style={{ flex: 1, padding: '10px 6px', borderRadius: '10px', fontWeight: '700', fontSize: '0.72rem', cursor: 'pointer', transition: 'all 0.2s',
+                    background: tipoComprobante === 'electronica' ? 'rgba(0,210,190,0.12)' : 'rgba(255,255,255,0.03)',
+                    border: `1px solid ${tipoComprobante === 'electronica' ? 'var(--primary)' : 'rgba(255,255,255,0.06)'}`,
+                    color: tipoComprobante === 'electronica' ? 'var(--primary)' : 'rgba(255,255,255,0.4)' }}>
+                  🌐 Electrónica (SIFEN)
+                </button>
+                <button onClick={() => setTipoComprobante('normal')}
+                  style={{ flex: 1, padding: '10px 6px', borderRadius: '10px', fontWeight: '700', fontSize: '0.72rem', cursor: 'pointer', transition: 'all 0.2s',
+                    background: tipoComprobante === 'normal' ? 'rgba(0,210,190,0.12)' : 'rgba(255,255,255,0.03)',
+                    border: `1px solid ${tipoComprobante === 'normal' ? 'var(--primary)' : 'rgba(255,255,255,0.06)'}`,
+                    color: tipoComprobante === 'normal' ? 'var(--primary)' : 'rgba(255,255,255,0.4)' }}>
+                  🧾 Factura / Ticket
+                </button>
+              </div>
             </div>
+
+            {/* Email - Oculto si es Normal */}
+            {tipoComprobante === 'electronica' && (
+              <div style={cardStyle}>
+                <label style={labelStyle}>Correo para envío de factura</label>
+                <input type="email" value={emailCliente} onChange={e => setEmailCliente(e.target.value)} placeholder="cliente@ejemplo.com (opcional)" style={inputStyle} />
+              </div>
+            )}
 
             {/* Método de pago */}
             <div style={cardStyle}>
@@ -501,7 +548,7 @@ export default function CajaPage() {
             <button onClick={emitirFactura} disabled={emitiendo || items.length === 0}
               className="luxury-button"
               style={{ width: '100%', padding: '16px', fontSize: '0.9rem', background: 'var(--accent-gradient)', color: '#000', opacity: (emitiendo || items.length === 0) ? 0.5 : 1, cursor: items.length === 0 ? 'not-allowed' : 'pointer' }}>
-              {emitiendo ? '⏳ Emitiendo factura SIFEN...' : '✅ EMITIR FACTURA ELECTRÓNICA'}
+              {emitiendo ? '⏳ Emitiendo factura...' : `✅ EMITIR ${tipoComprobante === 'electronica' ? 'FACTURA ELECTRÓNICA' : 'COMPROBANTE'}`}
             </button>
           </div>
         </div>

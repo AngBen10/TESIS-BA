@@ -10,6 +10,51 @@ const STATE_COLUMNS = [
   { key: 'Listo',           label: 'Listos p/ Entregar', icon: '✅', color: '#22c55e', next: 'Entregado',    btnText: 'Entregar' },
 ];
 
+const getTiempoTranscurrido = (pedido) => {
+  const now = Date.now();
+  let ts = pedido.timestamp;
+  
+  if (!ts) {
+    try {
+      if (pedido.fecha) {
+        const cleanFecha = pedido.fecha
+          .replace(/\s+/g, ' ')
+          .replace(/p\.\s*m\./i, 'PM')
+          .replace(/a\.\s*m\./i, 'AM');
+        
+        const parts = cleanFecha.split(',');
+        if (parts.length > 0) {
+          const dateParts = parts[0].trim().split('/');
+          if (dateParts.length === 3) {
+            const formattedDate = `${dateParts[1]}/${dateParts[0]}/${dateParts[2]} ${parts[1] || ''}`;
+            const parsed = Date.parse(formattedDate);
+            if (!isNaN(parsed)) ts = parsed;
+          }
+        }
+        
+        if (!ts) {
+          const parsed = Date.parse(cleanFecha);
+          if (!isNaN(parsed)) ts = parsed;
+        }
+      }
+    } catch (_) {}
+  }
+  
+  if (!ts) {
+    return 'Reciente';
+  }
+  
+  let diffMs = now - ts;
+  if (diffMs < 0) diffMs = 0;
+  const diffMins = Math.floor(diffMs / 60000);
+  
+  if (diffMins < 1) return 'Hace instantes';
+  if (diffMins < 60) return `Hace ${diffMins} min`;
+  const diffHoras = Math.floor(diffMins / 60);
+  const remMins = diffMins % 60;
+  return `Hace ${diffHoras}h ${remMins}m`;
+};
+
 export default function Cocina() {
   const [user, setUser] = useState(null);
   const [pedidos, setPedidos] = useState([]);
@@ -132,6 +177,9 @@ export default function Cocina() {
                           <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', marginLeft: '8px' }}>#{pedido.id}</span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span style={{ fontSize: '0.68rem', fontWeight: '800', color: col.color, background: `${col.color}15`, padding: '2px 6px', borderRadius: '4px' }}>
+                            {getTiempoTranscurrido(pedido)}
+                          </span>
                           <span style={{ fontSize: '0.62rem', color: 'rgba(255,255,255,0.3)' }}>{pedido.fecha}</span>
                           <button onClick={() => deletePedido(pedido.id)} style={{ background: 'rgba(239,68,68,0.08)', border: 'none', color: 'rgba(239,68,68,0.5)', width: '22px', height: '22px', borderRadius: '5px', cursor: 'pointer', fontSize: '0.7rem' }}>✕</button>
                         </div>

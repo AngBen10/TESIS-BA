@@ -42,14 +42,10 @@ export default function Menu() {
 
   const addToCart = (product) => {
     const isUnlimited = product.RequierePreparacion;
-    if (!isUnlimited && product.StockActual <= 0) { 
-      alert(`Sin stock: ${product.Nombre}`); return; 
-    }
+    // Eliminado: if (!isUnlimited && product.StockActual <= 0) { ... }
     const existing = cart.find(i => i.id === product.Id);
     if (existing) {
-      if (!isUnlimited && existing.cantidad >= product.StockActual) { 
-        alert('Stock insuficiente.'); return; 
-      }
+      // Eliminado: if (!isUnlimited && existing.cantidad >= product.StockActual) { ... }
       setCart(cart.map(i => i.id === product.Id ? { ...i, cantidad: i.cantidad + 1 } : i));
     } else {
       setCart([...cart, { 
@@ -63,16 +59,7 @@ export default function Menu() {
   };
 
   const updateQty = (id, delta) => {
-    if (delta > 0) {
-      const prod = products.find(p => p.Id === id);
-      if (prod && !prod.RequierePreparacion) {
-        const item = cart.find(i => i.id === id);
-        if (item && item.cantidad >= prod.StockActual) {
-          alert(`Stock insuficiente. Solo hay ${prod.StockActual} unidades disponibles.`);
-          return;
-        }
-      }
-    }
+    // Eliminado: limitación de stock para permitir stock negativo
     setCart(prev => prev
       .map(i => i.id === id ? { ...i, cantidad: i.cantidad + delta } : i)
       .filter(i => i.cantidad > 0)
@@ -103,6 +90,7 @@ export default function Menu() {
           id: baseId.toString().slice(-5),
           mesa: mesaLabel,
           fecha: new Date().toLocaleString('es-PY'),
+          timestamp: baseId,
           items: prepItems.map(i => ({ ...i })),
           nota: nota,
           mesero: u.nombre || 'Mesero',
@@ -116,6 +104,7 @@ export default function Menu() {
           id: (baseId + 1).toString().slice(-5),
           mesa: mesaLabel,
           fecha: new Date().toLocaleString('es-PY'),
+          timestamp: baseId + 1,
           items: readyItems.map(i => ({ ...i })),
           nota: prepItems.length > 0 ? '' : nota, // assign note to kitchen order if mixed
           mesero: u.nombre || 'Mesero',
@@ -131,7 +120,7 @@ export default function Menu() {
         // Only deduct if it's NOT unlimited (not requiring prep) and has stock tracking
         if (prod && !prod.RequierePreparacion) {
           try {
-            const newStock = Math.max(0, prod.StockActual - item.cantidad);
+            const newStock = prod.StockActual - item.cantidad;
             await fetch(`/api/productos/${prod.Id}`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
@@ -317,12 +306,11 @@ export default function Menu() {
                       ) : (
                         <button
                           onClick={() => addToCart(prod)}
-                          disabled={!prod.RequierePreparacion && prod.StockActual <= 0}
                           style={{ 
-                            background: (!prod.RequierePreparacion && prod.StockActual <= 0) ? 'rgba(255,255,255,0.05)' : 'var(--primary)', 
-                            color: (!prod.RequierePreparacion && prod.StockActual <= 0) ? 'rgba(255,255,255,0.2)' : '#000', 
+                            background: 'var(--primary)', 
+                            color: '#000', 
                             border: 'none', width: '30px', height: '30px', borderRadius: '8px', fontWeight: '900', 
-                            cursor: (!prod.RequierePreparacion && prod.StockActual <= 0) ? 'not-allowed' : 'pointer', 
+                            cursor: 'pointer', 
                             fontSize: '1.1rem', transition: 'all 0.15s' 
                           }}
                         >+</button>

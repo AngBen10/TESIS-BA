@@ -31,17 +31,20 @@ export async function GET(request) {
       });
     }
 
-    // Determinar si la búsqueda parece un RUC numérico o texto
-    const esRUC = /^\d+$/.test(q);
+    // Determinar si la búsqueda parece un RUC numérico o texto (tolerando guiones)
+    const cleanQ = q.replace(/-/g, '');
+    const esRUC = /^\d+$/.test(cleanQ);
 
     let result;
 
     if (esRUC) {
+      // Si tiene guion, tomamos la parte numérica antes del guion
+      const rucBase = q.includes('-') ? q.split('-')[0].trim() : q;
       // Búsqueda exacta o por prefijo de RUC
       result = await pool.request()
-        .input('q', sql.NVarChar(15), q + '%')
+        .input('q', sql.NVarChar(15), rucBase + '%')
         .query(`
-          SELECT TOP 10 RUC, DV, RazonSocial, RUCCompleto
+          SELECT TOP 10 RUC, DV, RazonSocial
           FROM Contribuyentes
           WHERE RUC LIKE @q
           ORDER BY RUC ASC
@@ -51,7 +54,7 @@ export async function GET(request) {
       result = await pool.request()
         .input('q', sql.NVarChar(305), '%' + q + '%')
         .query(`
-          SELECT TOP 10 RUC, DV, RazonSocial, RUCCompleto
+          SELECT TOP 10 RUC, DV, RazonSocial
           FROM Contribuyentes
           WHERE RazonSocial LIKE @q
           ORDER BY RazonSocial ASC
@@ -61,7 +64,7 @@ export async function GET(request) {
     const resultados = result.recordset.map(r => ({
       ruc:         r.RUC,
       dv:          r.DV,
-      rucCompleto: r.RUCCompleto,
+      rucCompleto: `${r.RUC}-${r.DV}`,
       razonSocial: r.RazonSocial
     }));
 
