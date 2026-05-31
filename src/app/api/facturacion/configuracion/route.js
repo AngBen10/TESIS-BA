@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server';
 import { getPool, sql } from '@/lib/db';
 
-// Obtener todas las configuraciones relacionadas con SIFEN
+// Obtener todas las configuraciones relacionadas con SIFEN y la Empresa
 export async function GET() {
   try {
     const pool = await getPool();
+    // Ampliamos la consulta para traer claves SIFEN_ y EMPRESA_
     const result = await pool.request().query(
-      "SELECT Clave, Valor FROM Configuracion WHERE Clave LIKE 'SIFEN_%'"
+      "SELECT Clave, Valor FROM Configuracion WHERE Clave LIKE 'SIFEN_%' OR Clave LIKE 'EMPRESA_%'"
     );
 
     // Convertir lista a objeto clave-valor
@@ -17,12 +18,12 @@ export async function GET() {
 
     return NextResponse.json({ success: true, config });
   } catch (err) {
-    console.error('Error al obtener configuración de SIFEN:', err);
+    console.error('Error al obtener la configuración:', err);
     return NextResponse.json({ error: 'Error interno del servidor al obtener configuración' }, { status: 500 });
   }
 }
 
-// Guardar o actualizar configuraciones de SIFEN
+// Guardar o actualizar configuraciones de SIFEN y la Empresa
 export async function POST(request) {
   try {
     const body = await request.json();
@@ -34,10 +35,10 @@ export async function POST(request) {
 
     try {
       const keys = Object.keys(body);
-      
+
       for (const clave of keys) {
-        // Solo permitimos modificar claves que comiencen con SIFEN_ por seguridad
-        if (!clave.startsWith('SIFEN_')) continue;
+        // Permitimos modificar tanto claves de SIFEN_ como de EMPRESA_ por seguridad
+        if (!clave.startsWith('SIFEN_') && !clave.startsWith('EMPRESA_')) continue;
 
         const valor = body[clave] !== undefined && body[clave] !== null ? String(body[clave]) : '';
 
@@ -65,7 +66,7 @@ export async function POST(request) {
     }
 
   } catch (err) {
-    console.error('Error al guardar configuración de SIFEN:', err);
+    console.error('Error al guardar la configuración:', err);
     return NextResponse.json({ error: 'Error interno al guardar la configuración' }, { status: 500 });
   }
 }

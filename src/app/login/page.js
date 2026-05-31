@@ -11,11 +11,26 @@ export default function LoginPage() {
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const router = useRouter();
 
+  // Estado para la configuración de la empresa
+  const [empresaConfig, setEmpresaConfig] = useState({ nombre: 'Sistema de Gestión', foto: null });
+
   useEffect(() => {
-    const handleMouseMove = (e) => {
-      setMousePos({ x: e.clientX, y: e.clientY });
-    };
+    const handleMouseMove = (e) => setMousePos({ x: e.clientX, y: e.clientY });
     window.addEventListener('mousemove', handleMouseMove);
+
+    // Obtener configuración visual de la empresa
+    fetch('/api/facturacion/configuracion')
+      .then(r => r.json())
+      .then(d => {
+        if (d.config) {
+          setEmpresaConfig({
+            nombre: d.config.EMPRESA_NOMBRE || 'Sistema de Gestión',
+            foto: d.config.EMPRESA_FOTO || null
+          });
+        }
+      })
+      .catch(() => { });
+
     return () => window.removeEventListener('mousemove', handleMouseMove);
   }, []);
 
@@ -49,157 +64,48 @@ export default function LoginPage() {
   };
 
   return (
-    <div style={{ 
-      height: '100vh', 
-      display: 'flex', 
-      alignItems: 'center', 
-      justifyContent: 'center',
-      background: '#000',
-      position: 'relative',
-      overflow: 'hidden'
-    }}>
-      {/* Interactive Background Glow */}
-      <div style={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        background: `radial-gradient(600px circle at ${mousePos.x}px ${mousePos.y}px, rgba(0, 210, 190, 0.15), transparent 40%)`,
-        transition: 'background 0.1s ease',
-        zIndex: 0,
-      }} />
+    <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000', position: 'relative', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', inset: 0, background: `radial-gradient(600px circle at ${mousePos.x}px ${mousePos.y}px, rgba(0, 210, 190, 0.15), transparent 40%)`, zIndex: 0 }} />
+      <div style={{ position: 'absolute', inset: 0, backgroundImage: 'url("/restaurant_login_bg_1778447534514.png")', backgroundSize: 'cover', opacity: 0.2, zIndex: 0 }} />
+      <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(circle at center, transparent 0%, #000 90%)', zIndex: 1, pointerEvents: 'none' }} />
 
-      {/* Imagen de fondo con overlay */}
-      <div style={{ 
-        position: 'absolute', 
-        top: 0, left: 0, right: 0, bottom: 0,
-        backgroundImage: 'url("/restaurant_login_bg_1778447534514.png")',
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        opacity: 0.2,
-        zIndex: 0
-      }} />
+      <div className="glass-card luxury-shadow" style={{ width: '100%', maxWidth: '450px', padding: '3rem', zIndex: 2, border: '1px solid rgba(0, 210, 190, 0.2)', background: 'rgba(5, 5, 5, 0.6)', backdropFilter: 'blur(16px)' }}>
 
-      <div style={{ 
-        position: 'absolute', 
-        top: 0, left: 0, right: 0, bottom: 0,
-        background: 'radial-gradient(circle at center, transparent 0%, #000 90%)',
-        zIndex: 1,
-        pointerEvents: 'none'
-      }} />
-      
-      <div className="glass-card luxury-shadow" style={{ 
-        width: '100%', 
-        maxWidth: '450px', 
-        padding: '3rem',
-        zIndex: 2,
-        animation: 'fadeIn 1s ease-out',
-        border: '1px solid rgba(0, 210, 190, 0.2)',
-        background: 'rgba(5, 5, 5, 0.6)',
-        backdropFilter: 'blur(16px)'
-      }}>
+        {/* Renderizado Dinámico del Logo y Nombre de Empresa */}
         <div style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
-          <h1 style={{ 
-            fontSize: '2.5rem', 
-            fontWeight: '900', 
-            color: 'var(--primary)',
-            letterSpacing: '8px',
-            marginBottom: '0.2rem',
-            textShadow: '0 0 20px rgba(0, 210, 190, 0.3)'
-          }}>
-            LA PARADA
-          </h1>
-          <p style={{ 
-            color: 'var(--text-muted)', 
-            fontSize: '0.7rem', 
-            textTransform: 'uppercase', 
-            letterSpacing: '4px',
-            fontWeight: 'bold'
-          }}>
-            Restaurante & Bar
-          </p>
-        </div>
-
-        <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          <div>
-            <label style={{ 
-              display: 'block', 
-              marginBottom: '0.6rem', 
-              fontSize: '0.7rem', 
-              color: 'var(--primary)',
-              fontWeight: 'bold',
-              letterSpacing: '1px',
-              textTransform: 'uppercase'
-            }}>Usuario de Acceso</label>
-            <input 
-              type="text" 
-              className="luxury-input"
-              style={{ width: '100%', borderColor: 'rgba(0, 210, 190, 0.2)' }}
-              value={usuario}
-              onChange={(e) => setUsuario(e.target.value)}
-              placeholder="Ej: Administrador"
-              required
+          {empresaConfig.foto ? (
+            <img
+              src={empresaConfig.foto}
+              alt="Logo Empresa"
+              style={{ width: '80px', height: '80px', borderRadius: '20px', objectFit: 'cover', margin: '0 auto 1rem', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}
             />
-          </div>
-
-          <div>
-            <label style={{ 
-              display: 'block', 
-              marginBottom: '0.6rem', 
-              fontSize: '0.7rem', 
-              color: 'var(--primary)',
-              fontWeight: 'bold',
-              letterSpacing: '1px',
-              textTransform: 'uppercase'
-            }}>Contraseña</label>
-            <input 
-              type="password" 
-              className="luxury-input"
-              style={{ width: '100%', borderColor: 'rgba(0, 210, 190, 0.2)' }}
-              value={contrasena}
-              onChange={(e) => setContrasena(e.target.value)}
-              placeholder="••••••••"
-              required
-            />
-          </div>
-
-          {error && (
-            <div style={{ 
-              color: 'var(--error)', 
-              fontSize: '0.75rem', 
-              textAlign: 'center',
-              padding: '10px',
-              background: 'rgba(255, 77, 77, 0.05)',
-              border: '1px solid rgba(255, 77, 77, 0.2)',
-              borderRadius: '8px'
-            }}>
-              {error}
+          ) : (
+            <div style={{ width: '80px', height: '80px', background: 'var(--accent-gradient)', borderRadius: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '2.5rem', fontWeight: '900', color: '#000', margin: '0 auto 1rem', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}>
+              {empresaConfig.nombre.charAt(0).toUpperCase()}
             </div>
           )}
-
-          <button 
-            type="submit" 
-            className="luxury-button"
-            disabled={loading}
-            style={{ 
-              width: '100%', 
-              marginTop: '1rem',
-              background: 'var(--accent-gradient)',
-              color: '#000',
-              fontWeight: '900',
-              padding: '14px'
-            }}
-          >
-            {loading ? 'VALIDANDO...' : 'INICIAR SESIÓN'}
-          </button>
-        </form>
-
-        <div style={{ marginTop: '2.5rem', textAlign: 'center', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '1.5rem' }}>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.6rem', letterSpacing: '1px', opacity: 0.6 }}>
-            © 2026 LA PARADA BAR - SISTEMA ELITE V2.0
+          <h1 style={{ color: '#fff', fontSize: '1.5rem', fontWeight: '900', letterSpacing: '1px' }}>
+            {empresaConfig.nombre}
+          </h1>
+          <p style={{ color: 'var(--primary)', fontSize: '0.75rem', fontWeight: '800', marginTop: '4px', textTransform: 'uppercase', letterSpacing: '2px' }}>
+            Acceso al Sistema
           </p>
         </div>
+
+        <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
+          <div>
+            <label style={{ display: 'block', marginBottom: '0.6rem', fontSize: '0.7rem', color: 'var(--primary)', fontWeight: 'bold', letterSpacing: '1px', textTransform: 'uppercase' }}>Usuario de Acceso</label>
+            <input type="text" value={usuario} onChange={(e) => setUsuario(e.target.value)} required className="luxury-input" placeholder="Ej: admin" style={{ width: '100%' }} />
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: '0.6rem', fontSize: '0.7rem', color: 'var(--primary)', fontWeight: 'bold', letterSpacing: '1px', textTransform: 'uppercase' }}>Contraseña</label>
+            <input type="password" value={contrasena} onChange={(e) => setContrasena(e.target.value)} required className="luxury-input" placeholder="••••••••" style={{ width: '100%' }} />
+          </div>
+          {error && <p style={{ color: 'var(--error)', fontSize: '0.85rem', textAlign: 'center', fontWeight: '600', padding: '0.5rem', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '8px' }}>{error}</p>}
+          <button type="submit" disabled={loading} className="luxury-button" style={{ marginTop: '1rem', width: '100%' }}>
+            {loading ? 'VERIFICANDO...' : 'INGRESAR'}
+          </button>
+        </form>
       </div>
     </div>
   );

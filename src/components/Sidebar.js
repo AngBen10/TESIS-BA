@@ -1,10 +1,34 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 
 export default function Sidebar({ user }) {
   const router = useRouter();
   const pathname = usePathname();
+
+  // Estado para escuchar la configuración visual
+  const [empresaConfig, setEmpresaConfig] = useState({ nombre: 'Cargando...', foto: null });
+
+  useEffect(() => {
+    const fetchConfig = () => {
+      fetch('/api/facturacion/configuracion')
+        .then(r => r.json())
+        .then(d => {
+          if (d.config) {
+            setEmpresaConfig({
+              nombre: d.config.EMPRESA_NOMBRE || 'Mi Restaurante',
+              foto: d.config.EMPRESA_FOTO || null
+            });
+          }
+        })
+        .catch(() => setEmpresaConfig({ nombre: 'Mi Restaurante', foto: null }));
+    };
+
+    fetchConfig();
+    window.addEventListener('empresa_updated', fetchConfig);
+    return () => window.removeEventListener('empresa_updated', fetchConfig);
+  }, []);
 
   const handleLogout = () => {
     localStorage.removeItem('user');
@@ -12,50 +36,60 @@ export default function Sidebar({ user }) {
   };
 
   const navItems = [
-    { label: 'Dashboard', path: '/', icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="3" y="3" width="7" height="9"></rect>
-        <rect x="14" y="3" width="7" height="5"></rect>
-        <rect x="14" y="12" width="7" height="9"></rect>
-        <rect x="3" y="16" width="7" height="5"></rect>
-      </svg>
-    )},
-    { label: 'Mesas', path: '/mesas', icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="3" y="3" width="4" height="4"></rect>
-        <rect x="10" y="3" width="4" height="4"></rect>
-        <rect x="17" y="3" width="4" height="4"></rect>
-        <rect x="3" y="10" width="4" height="4"></rect>
-        <rect x="10" y="10" width="4" height="4"></rect>
-        <rect x="17" y="10" width="4" height="4"></rect>
-        <rect x="3" y="17" width="4" height="4"></rect>
-        <rect x="10" y="17" width="4" height="4"></rect>
-        <rect x="17" y="17" width="4" height="4"></rect>
-      </svg>
-    )},
-    { label: 'Pedidos (Cocina)', path: '/cocina', icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
-        <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
-        <path d="M9 14h6"></path>
-        <path d="M9 18h6"></path>
-        <path d="M9 10h.01"></path>
-      </svg>
-    )},
-    { label: 'Menú', path: '/menu', icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"></path>
-        <path d="M7 2v20"></path>
-        <path d="M21 15V2v0a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"></path>
-      </svg>
-    )},
-    { label: 'Punto de Venta', path: '/caja', icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="10"></circle>
-        <path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"></path>
-        <path d="M12 18V6"></path>
-      </svg>
-    )},
+    {
+      label: 'Dashboard', path: '/', icon: (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="3" width="7" height="9"></rect>
+          <rect x="14" y="3" width="7" height="5"></rect>
+          <rect x="14" y="12" width="7" height="9"></rect>
+          <rect x="3" y="16" width="7" height="5"></rect>
+        </svg>
+      )
+    },
+    {
+      label: 'Mesas', path: '/mesas', icon: (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="3" width="4" height="4"></rect>
+          <rect x="10" y="3" width="4" height="4"></rect>
+          <rect x="17" y="3" width="4" height="4"></rect>
+          <rect x="3" y="10" width="4" height="4"></rect>
+          <rect x="10" y="10" width="4" height="4"></rect>
+          <rect x="17" y="10" width="4" height="4"></rect>
+          <rect x="3" y="17" width="4" height="4"></rect>
+          <rect x="10" y="17" width="4" height="4"></rect>
+          <rect x="17" y="17" width="4" height="4"></rect>
+        </svg>
+      )
+    },
+    {
+      label: 'Pedidos (Cocina)', path: '/cocina', icon: (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+          <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
+          <path d="M9 14h6"></path>
+          <path d="M9 18h6"></path>
+          <path d="M9 10h.01"></path>
+        </svg>
+      )
+    },
+    {
+      label: 'Menú', path: '/menu', icon: (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"></path>
+          <path d="M7 2v20"></path>
+          <path d="M21 15V2v0a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"></path>
+        </svg>
+      )
+    },
+    {
+      label: 'Punto de Venta', path: '/caja', icon: (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"></path>
+          <path d="M12 18V6"></path>
+        </svg>
+      )
+    },
   ];
 
   return (
@@ -71,23 +105,26 @@ export default function Sidebar({ user }) {
         boxSizing: 'border-box',
       }}
     >
-      {/* Logo */}
+      {/* ── LOGO Y NOMBRE DE EMPRESA DINÁMICO ── */}
       <div style={{ marginBottom: '2.5rem', paddingLeft: '0.5rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '4px' }}>
-          <div style={{
-            width: '44px', height: '44px',
-            background: 'var(--accent-gradient)',
-            borderRadius: '10px',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: '1.4rem', fontWeight: '900', color: '#000',
-            boxShadow: '0 4px 15px rgba(0, 210, 190, 0.3)'
-          }}>L</div>
-          <h2 style={{ fontSize: '1rem', fontWeight: '900', color: '#fff', letterSpacing: '0.5px' }}>
-            La Parada Bar
+          {empresaConfig.foto ? (
+            <img
+              src={empresaConfig.foto}
+              alt="Logo"
+              style={{ width: '44px', height: '44px', borderRadius: '10px', objectFit: 'cover', boxShadow: '0 4px 15px rgba(0, 210, 190, 0.3)' }}
+            />
+          ) : (
+            <div style={{ width: '44px', height: '44px', background: 'var(--accent-gradient)', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.4rem', fontWeight: '900', color: '#000', boxShadow: '0 4px 15px rgba(0, 210, 190, 0.3)' }}>
+              {empresaConfig.nombre.charAt(0).toUpperCase()}
+            </div>
+          )}
+          <h2 style={{ fontSize: '0.95rem', fontWeight: '900', color: '#fff', letterSpacing: '0.5px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {empresaConfig.nombre}
           </h2>
         </div>
         <p style={{ fontSize: '0.6rem', color: 'rgba(255,255,255,0.3)', letterSpacing: '2.5px', paddingLeft: '56px', fontWeight: '700', textTransform: 'uppercase' }}>
-          Facturación
+          Sistema
         </p>
       </div>
 
@@ -159,7 +196,7 @@ export default function Sidebar({ user }) {
                   <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
                 </svg>
               </span>
-              Configuración SIFEN
+              Configuración
             </div>
           </>
         )}
@@ -199,13 +236,14 @@ export default function Sidebar({ user }) {
             boxShadow: '0 4px 10px rgba(0,0,0,0.3)',
             position: 'relative'
           }}>
-             <div style={{
-                position: 'absolute', bottom: '-2px', right: '-2px',
-                width: '16px', height: '16px', background: '#000',
-                borderRadius: '50%', border: '2px solid #1a1d24',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: '0.55rem'
-             }}>N</div>
+            {user.nombre ? user.nombre.charAt(0).toUpperCase() : 'U'}
+            <div style={{
+              position: 'absolute', bottom: '-2px', right: '-2px',
+              width: '16px', height: '16px', background: '#000',
+              borderRadius: '50%', border: '2px solid #1a1d24',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: '0.55rem'
+            }}>N</div>
           </div>
 
           {/* Name + Role */}
@@ -221,7 +259,7 @@ export default function Sidebar({ user }) {
             </p>
           </div>
 
-          {/* Logout icon (SVG-like) */}
+          {/* Logout icon */}
           <button
             onClick={handleLogout}
             title="Cerrar Sesión"
@@ -237,7 +275,7 @@ export default function Sidebar({ user }) {
               transition: 'all 0.2s'
             }}
           >
-            ⎗
+            ⏻
           </button>
         </div>
       )}
