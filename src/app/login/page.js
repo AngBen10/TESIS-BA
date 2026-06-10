@@ -11,14 +11,12 @@ export default function LoginPage() {
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const router = useRouter();
 
-  // Estado para la configuración de la empresa
   const [empresaConfig, setEmpresaConfig] = useState({ nombre: 'Sistema de Gestión', foto: null });
 
   useEffect(() => {
     const handleMouseMove = (e) => setMousePos({ x: e.clientX, y: e.clientY });
     window.addEventListener('mousemove', handleMouseMove);
 
-    // Obtener configuración visual de la empresa
     fetch('/api/facturacion/configuracion')
       .then(r => r.json())
       .then(d => {
@@ -71,7 +69,6 @@ export default function LoginPage() {
 
       <div className="glass-card luxury-shadow" style={{ width: '100%', maxWidth: '450px', padding: '3rem', zIndex: 2, border: '1px solid rgba(0, 210, 190, 0.2)', background: 'rgba(5, 5, 5, 0.6)', backdropFilter: 'blur(16px)' }}>
 
-        {/* Renderizado Dinámico del Logo y Nombre de Empresa */}
         <div style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
           {empresaConfig.foto ? (
             <img

@@ -12,6 +12,7 @@ export default function Menu() {
   const [selectedCat, setSelectedCat] = useState('Todas');
   const [cart, setCart] = useState([]);
   const [selectedMesa, setSelectedMesa] = useState('1');
+  const [mesasDisponibles, setMesasDisponibles] = useState([]);
   const [showAdmin, setShowAdmin] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [editingProd, setEditingProd] = useState(null);
@@ -34,32 +35,45 @@ export default function Menu() {
 
   const fetchData = async () => {
     try {
-      const [pRes, cRes] = await Promise.all([fetch('/api/productos'), fetch('/api/categorias')]);
+      const [pRes, cRes, mRes] = await Promise.all([
+        fetch('/api/productos'),
+        fetch('/api/categorias'),
+        fetch('/api/mesas'),
+      ]);
       setProducts(await pRes.json());
       setCategories(await cRes.json());
+      // Mesas reales desde BD (config gestionada por el admin)
+      if (mRes.ok) {
+        const md = await mRes.json();
+        const lista = (md.mesas || []).map(m => ({ numero: m.Numero, capacidad: m.Capacidad }));
+        setMesasDisponibles(lista);
+        // Si la mesa seleccionada actual no existe en la lista, seleccionar la primera
+        if (lista.length > 0 && !lista.some(m => m.numero.toString() === selectedMesa.toString())) {
+          const params = new URLSearchParams(window.location.search);
+          const mesaQ = params.get('mesa');
+          if (!mesaQ) setSelectedMesa(lista[0].numero.toString());
+        }
+      }
     } catch (err) { console.error(err); }
   };
 
   const addToCart = (product) => {
     const isUnlimited = product.RequierePreparacion;
-    // Eliminado: if (!isUnlimited && product.StockActual <= 0) { ... }
     const existing = cart.find(i => i.id === product.Id);
     if (existing) {
-      // Eliminado: if (!isUnlimited && existing.cantidad >= product.StockActual) { ... }
       setCart(cart.map(i => i.id === product.Id ? { ...i, cantidad: i.cantidad + 1 } : i));
     } else {
-      setCart([...cart, { 
-        id: product.Id, 
-        nombre: product.Nombre, 
-        precio: product.Precio, 
-        cantidad: 1, 
-        requierePreparacion: product.RequierePreparacion 
+      setCart([...cart, {
+        id: product.Id,
+        nombre: product.Nombre,
+        precio: product.Precio,
+        cantidad: 1,
+        requierePreparacion: product.RequierePreparacion
       }]);
     }
   };
 
   const updateQty = (id, delta) => {
-    // Eliminado: limitación de stock para permitir stock negativo
     setCart(prev => prev
       .map(i => i.id === id ? { ...i, cantidad: i.cantidad + delta } : i)
       .filter(i => i.cantidad > 0)
@@ -76,11 +90,9 @@ export default function Menu() {
       const u = storedUser ? JSON.parse(storedUser) : {};
       const mesaLabel = `Mesa ${selectedMesa}`;
 
-      // Load current orders
       const raw = localStorage.getItem('restaurante_pedidos');
       let pedidos = raw ? JSON.parse(raw) : [];
 
-      // Split the cart into items that require preparation and items that are ready immediately
       const prepItems = cart.filter(i => i.requierePreparacion);
       const readyItems = cart.filter(i => !i.requierePreparacion);
       const baseId = Date.now();
@@ -94,49 +106,32 @@ export default function Menu() {
           items: prepItems.map(i => ({ ...i })),
           nota: nota,
           mesero: u.nombre || 'Mesero',
+          meseroId: u.id || null,   // ← NUEVO: ID del mesero real para el reporte
           estado: 'Pendiente',
         });
       }
 
       if (readyItems.length > 0) {
-        // Offset ID by 1 to prevent collisions if both are submitted together
         pedidos.push({
           id: (baseId + 1).toString().slice(-5),
           mesa: mesaLabel,
           fecha: new Date().toLocaleString('es-PY'),
           timestamp: baseId + 1,
           items: readyItems.map(i => ({ ...i })),
-          nota: prepItems.length > 0 ? '' : nota, // assign note to kitchen order if mixed
+          nota: prepItems.length > 0 ? '' : nota,
           mesero: u.nombre || 'Mesero',
+          meseroId: u.id || null,   // ← NUEVO: ID del mesero real para el reporte
           estado: 'Listo',
         });
       }
 
       localStorage.setItem('restaurante_pedidos', JSON.stringify(pedidos));
 
-      // Deduct stock in DB
-      for (const item of cart) {
-        const prod = products.find(p => p.Id === item.id);
-        // Only deduct if it's NOT unlimited (not requiring prep) and has stock tracking
-        if (prod && !prod.RequierePreparacion) {
-          try {
-            const newStock = prod.StockActual - item.cantidad;
-            await fetch(`/api/productos/${prod.Id}`, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                codigo: prod.Codigo || '',
-                nombre: prod.Nombre,
-                precio: prod.Precio,
-                categoriaId: prod.CategoriaId,
-                requierePreparacion: prod.RequierePreparacion,
-                stockActual: newStock,
-                stockMinimo: prod.StockMinimo || 0
-              })
-            });
-          } catch (err) { console.error("Error updating stock:", err); }
-        }
-      }
+      // NOTA: El descuento de stock ya NO se hace acá.
+      // Se centralizó en /api/facturacion/emitir (atómico, al cobrar), para:
+      //  - evitar doble descuento entre el menú y la caja,
+      //  - que la venta presencial también descuente,
+      //  - no descontar si el pedido se cancela antes de cobrarse.
 
       // Update table state to Ocupada
       const rawMesas = localStorage.getItem('restaurante_mesas');
@@ -163,25 +158,25 @@ export default function Menu() {
   const openModal = (prod = null) => {
     if (prod) {
       setEditingProd(prod);
-      setFormProd({ 
-        codigo: prod.Codigo || '', 
-        nombre: prod.Nombre, 
-        precio: prod.Precio, 
-        categoriaId: prod.CategoriaId, 
-        requierePreparacion: prod.RequierePreparacion ?? true, 
-        stockActual: prod.StockActual || 0, 
-        stockMinimo: prod.StockMinimo || 0 
+      setFormProd({
+        codigo: prod.Codigo || '',
+        nombre: prod.Nombre,
+        precio: prod.Precio,
+        categoriaId: prod.CategoriaId,
+        requierePreparacion: prod.RequierePreparacion ?? true,
+        stockActual: prod.StockActual || 0,
+        stockMinimo: prod.StockMinimo || 0
       });
     } else {
       setEditingProd(null);
-      setFormProd({ 
-        codigo: '', 
-        nombre: '', 
-        precio: '', 
-        categoriaId: categories[0]?.Id || '', 
-        requierePreparacion: true, 
-        stockActual: 0, 
-        stockMinimo: 0 
+      setFormProd({
+        codigo: '',
+        nombre: '',
+        precio: '',
+        categoriaId: categories[0]?.Id || '',
+        requierePreparacion: true,
+        stockActual: 0,
+        stockMinimo: 0
       });
     }
     setShowModal(true);
@@ -306,12 +301,12 @@ export default function Menu() {
                       ) : (
                         <button
                           onClick={() => addToCart(prod)}
-                          style={{ 
-                            background: 'var(--primary)', 
-                            color: '#000', 
-                            border: 'none', width: '30px', height: '30px', borderRadius: '8px', fontWeight: '900', 
-                            cursor: 'pointer', 
-                            fontSize: '1.1rem', transition: 'all 0.15s' 
+                          style={{
+                            background: 'var(--primary)',
+                            color: '#000',
+                            border: 'none', width: '30px', height: '30px', borderRadius: '8px', fontWeight: '900',
+                            cursor: 'pointer',
+                            fontSize: '1.1rem', transition: 'all 0.15s'
                           }}
                         >+</button>
                       )}
@@ -330,8 +325,16 @@ export default function Menu() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
               <h3 style={{ color: 'var(--primary)', fontWeight: '800', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '7px' }}>🧾 Orden actual</h3>
               <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: '8px', padding: '3px 8px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                <select value={selectedMesa} onChange={e => setSelectedMesa(e.target.value)} style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '0.78rem', fontWeight: '700', outline: 'none', cursor: 'pointer' }}>
-                  {Array.from({ length: 12 }, (_, i) => i + 1).map(n => <option key={n} value={n} style={{ background: '#111' }}>Mesa {n}</option>)}
+                <select value={selectedMesa} onChange={e => setSelectedMesa(e.target.value)} style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '0.78rem', fontWeight: '700', outline: 'none', cursor: 'pointer', maxWidth: '120px' }}>
+                  {mesasDisponibles.length === 0 ? (
+                    <option value="1" style={{ background: '#111' }}>Mesa 1</option>
+                  ) : (
+                    mesasDisponibles.map(m => (
+                      <option key={m.numero} value={m.numero} style={{ background: '#111' }}>
+                        Mesa {m.numero} ({m.capacidad}p)
+                      </option>
+                    ))
+                  )}
                 </select>
               </div>
             </div>

@@ -1,7 +1,6 @@
 const fs = require('fs');
 const path = require('path');
 
-// Cargar .env.local manualmente si no existe dotenv
 try {
   const envPath = path.resolve(process.cwd(), '.env.local');
   if (fs.existsSync(envPath)) {

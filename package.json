@@ -1,5 +1,5 @@
 {
-  "name": "la-parada-bar",
+  "name": "karuware",
   "version": "0.1.0",
   "private": true,
   "main": "main.js",
@@ -7,8 +7,11 @@
     "dev": "next dev",
     "desktop": "concurrently \"npm run dev\" \"wait-on http://localhost:3000 && electron .\"",
     "build": "next build",
+    "build:standalone": "next build && node scripts/postbuild.js",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "dist": "npm run build:standalone && electron-builder --win",
+    "dist:portable": "npm run build:standalone && electron-builder --win portable"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
@@ -22,7 +25,63 @@
   "devDependencies": {
     "concurrently": "^9.2.1",
     "electron": "^42.0.0",
-    "electron-is-dev": "^3.0.1",
+    "electron-builder": "^25.1.8",
     "wait-on": "^9.0.5"
+  },
+  "build": {
+    "appId": "com.laparada.bar",
+    "productName": "La Parada Bar",
+    "copyright": "Copyright © 2026 Anglex Software Solutions",
+    "asar": false,
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "build/icon.ico",
+      ".next/standalone/**/*",
+      "!**/*.md",
+      "!**/*.ts",
+      "!**/*.map",
+      "!**/.git/**",
+      "!**/test/**",
+      "!**/tests/**"
+    ],
+    "extraResources": [
+      {
+        "from": "build",
+        "to": "build",
+        "filter": [
+          "icon.ico"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "La Parada Bar",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico"
+    },
+    "portable": {
+      "artifactName": "${productName}-Portable-${version}.${ext}"
+    }
   }
 }

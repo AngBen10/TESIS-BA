@@ -1,2 +1,4 @@
 node_modules
 .next
+dist/
+repomix-output.xml

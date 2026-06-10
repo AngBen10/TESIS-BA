@@ -3,8 +3,7 @@ import { getPool, sql } from '@/lib/db';
 
 /**
  * GET /api/facturacion/buscar-ruc?q=XXXXXXX
- * 
- * Busca contribuyentes en la tabla DNIT por RUC exacto o por
+ * * Busca contribuyentes en la tabla DNIT por RUC exacto o por
  * prefijo/texto de Razón Social. Devuelve hasta 10 sugerencias.
  */
 export async function GET(request) {
@@ -61,12 +60,26 @@ export async function GET(request) {
         `);
     }
 
-    const resultados = result.recordset.map(r => ({
-      ruc:         r.RUC,
-      dv:          r.DV,
-      rucCompleto: `${r.RUC}-${r.DV}`,
-      razonSocial: r.RazonSocial
-    }));
+    const resultados = result.recordset.map(r => {
+      let nombreFormateado = r.RazonSocial;
+
+      // Verificamos si existe una coma (formato "APELLIDOS, NOMBRES" de personas físicas)
+      if (nombreFormateado && nombreFormateado.includes(',')) {
+        const partes = nombreFormateado.split(',');
+        // partes[0] contiene los apellidos (ej: "BENITEZ PALMA")
+        // partes[1] contiene los nombres (ej: " ANGEL DAVID")
+
+        // Los unimos invirtiendo el orden y usamos trim() para limpiar espacios vacíos
+        nombreFormateado = `${partes[1].trim()} ${partes[0].trim()}`;
+      }
+
+      return {
+        ruc: r.RUC,
+        dv: r.DV,
+        rucCompleto: `${r.RUC}-${r.DV}`,
+        razonSocial: nombreFormateado
+      };
+    });
 
     return NextResponse.json({ resultados });
 

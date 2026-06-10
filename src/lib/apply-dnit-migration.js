@@ -17,7 +17,6 @@ async function run() {
   const pool = await getPool();
   console.log('Aplicando migración DNIT...');
 
-  // Tabla Contribuyentes
   await pool.request().query(`
     IF OBJECT_ID('Contribuyentes', 'U') IS NULL
     BEGIN
@@ -37,7 +36,6 @@ async function run() {
     END
   `);
 
-  // Claves SMTP en Configuracion
   const smtpKeys = [
     ['SMTP_Host',     'smtp.gmail.com'],
     ['SMTP_Port',     '587'],

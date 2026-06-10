@@ -1,4 +1,5 @@
-import './globals.css'
+import './globals.css';
+import { EmpresaConfigProvider } from './context/EmpresaConfigContext';
 
 export const metadata = {
   title: 'La Parada Bar - Sistema de Gestión',
@@ -8,7 +9,9 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="es">
-      <body>{children}</body>
+      <EmpresaConfigProvider>
+        <body>{children}</body>
+      </EmpresaConfigProvider>
     </html>
-  )
+  );
 }

@@ -28,6 +28,8 @@ export default function CajaPage() {
 
   // Estado de la emisión
   const [tipoComprobante, setTipoComprobante] = useState('electronica'); // 'electronica' | 'normal'
+  const [tipoDocumento, setTipoDocumento] = useState('factura'); // 'factura' | 'nota_credito'
+  const [isConfigFixed, setIsConfigFixed] = useState(false);
   const [emitiendo, setEmitiendo] = useState(false);
   const [resultado, setResultado] = useState(null); // { ok, factura }
   const [error, setError] = useState('');
@@ -35,6 +37,9 @@ export default function CajaPage() {
 
   // Búsqueda de productos para presencial
   const [busqProd, setBusqProd] = useState('');
+  const [categorias, setCategorias] = useState([]);
+  const [catSel, setCatSel] = useState('todas');
+  const busqProdRef = useRef(null);
 
   useEffect(() => {
     const u = localStorage.getItem('user');
@@ -44,6 +49,17 @@ export default function CajaPage() {
     setUser(parsed);
     cargarPedidos();
     cargarProductos();
+
+    // Cargar config global
+    fetch('/api/facturacion/configuracion')
+      .then(r => r.json())
+      .then(d => {
+        if (d.config && d.config.SIFEN_FacturadorElectronico !== undefined) {
+          setTipoComprobante(d.config.SIFEN_FacturadorElectronico === '1' ? 'electronica' : 'normal');
+          setIsConfigFixed(true); // Ocultar el selector porque ya está fijo
+        }
+      })
+      .catch(() => { });
 
     const handleStorageChange = () => cargarPedidos();
     window.addEventListener('storage', handleStorageChange);
@@ -72,6 +88,7 @@ export default function CajaPage() {
             mesaNumero: mesaNum,
             mesaId: mesaNum,
             mesero: p.mesero || 'Mesero',
+            meseroId: p.meseroId || null,   // ← NUEVO: ID real del mesero para reporte
             fechaCreacion: p.fecha,
             items: [],
             total: 0,
@@ -125,6 +142,8 @@ export default function CajaPage() {
     try {
       const r = await fetch('/api/productos');
       if (r.ok) { const d = await r.json(); setProductos(Array.isArray(d) ? d : (d.productos || [])); }
+      const rc = await fetch('/api/categorias');
+      if (rc.ok) { const dc = await rc.json(); setCategorias(Array.isArray(dc) ? dc : (dc.categorias || [])); }
     } catch (_) { }
   };
 
@@ -179,6 +198,34 @@ export default function CajaPage() {
     );
   };
 
+  const setCantidadExacta = (prodId, val) => {
+    const n = Math.max(0, parseInt(val) || 0);
+    setItemsPresencial(prev => prev
+      .map(i => i.productoId === prodId ? { ...i, cantidad: n, subtotal: n * i.precioUnitario } : i)
+      .filter(i => i.cantidad > 0)
+    );
+  };
+
+  const quitarItem = (prodId) => setItemsPresencial(prev => prev.filter(i => i.productoId !== prodId));
+  const vaciarCarrito = () => setItemsPresencial([]);
+
+  // Buscar producto por código exacto (para lector de código de barras / Enter)
+  const onBuscarKeyDown = (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const q = busqProd.toLowerCase().trim();
+    if (!q) return;
+    // Prioridad 1: match exacto por código (lo que tipea un escáner)
+    let prod = productos.find(p => p.Activo !== false && p.Codigo && String(p.Codigo).toLowerCase() === q);
+    // Prioridad 2: primer resultado del filtro actual
+    if (!prod && productosFiltrados.length > 0) prod = productosFiltrados[0];
+    if (prod) {
+      agregarProductoPresencial(prod);
+      setBusqProd('');
+      setTimeout(() => busqProdRef.current?.focus(), 10);
+    }
+  };
+
   const items = modo === 'mesa' ? (pedidoSel?.items || []) : itemsPresencial;
   const total = items.reduce((s, i) => s + i.subtotal, 0);
   const totalIVA = Math.round(total / 11);
@@ -195,7 +242,7 @@ export default function CajaPage() {
         const rPed = await fetch('/api/pedidos', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tipo: 'Presencial', cajeroId: user.id, items })
+          body: JSON.stringify({ tipo: 'Presencial', cajeroId: user.id, meseroId: user.id, items })  // ← NUEVO: en presencial el cajero es el mesero
         });
         if (!rPed.ok) throw new Error('No se pudo crear el pedido presencial.');
         const dPed = await rPed.json();
@@ -212,6 +259,7 @@ export default function CajaPage() {
           body: JSON.stringify({
             tipo: 'Mesa',
             cajeroId: user.id,
+            meseroId: pedidoSel.meseroId || user.id,   // ← NUEVO: mesero real (fallback al cajero si pedido viejo)
             mesaNumero: pedidoSel.mesaNumero,
             items: backendItems
           })
@@ -230,7 +278,8 @@ export default function CajaPage() {
           nombreCliente: razonSocial,
           metodoPago,
           cajeroId: user.id,
-          isElectronica: tipoComprobante === 'electronica'
+          isElectronica: tipoComprobante === 'electronica',
+          isNotaCredito: tipoDocumento === 'nota_credito'
         })
       });
 
@@ -245,7 +294,9 @@ export default function CajaPage() {
         items,
         totalFactura: total,
         fechaEmision: new Date().toISOString(),
-        nombreCliente: razonSocial
+        nombreCliente: razonSocial,
+        isNotaCredito: tipoDocumento === 'nota_credito',
+        isElectronica: tipoComprobante === 'electronica'
       };
 
       setResultado(facturaData);
@@ -302,15 +353,27 @@ export default function CajaPage() {
     }
   };
 
-  const productosFiltrados = productos.filter(p =>
-    p.Activo !== false && p.Nombre.toLowerCase().includes(busqProd.toLowerCase())
-  );
+  const _q = busqProd.toLowerCase().trim();
+  const productosFiltrados = productos.filter(p => {
+    if (p.Activo === false) return false;
+    const matchCat = catSel === 'todas' || String(p.CategoriaId) === String(catSel);
+    const matchTexto = !_q ||
+      p.Nombre.toLowerCase().includes(_q) ||
+      (p.Codigo && String(p.Codigo).toLowerCase().includes(_q));
+    return matchCat && matchTexto;
+  });
 
   if (!user) return null;
 
   const inputStyle = { width: '100%', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.09)', borderRadius: '10px', padding: '10px 14px', color: '#fff', fontSize: '0.85rem', fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' };
   const labelStyle = { display: 'block', fontSize: '0.65rem', color: 'var(--primary)', fontWeight: '800', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '6px' };
   const cardStyle = { background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: '14px', padding: '1.2rem', marginBottom: '1rem' };
+  const chipCat = (active) => ({
+    padding: '5px 12px', fontSize: '0.68rem', fontWeight: '700', borderRadius: '7px', cursor: 'pointer',
+    border: active ? '1px solid var(--primary)' : '1px solid rgba(255,255,255,0.08)',
+    background: active ? 'rgba(0,210,190,0.12)' : 'rgba(255,255,255,0.03)',
+    color: active ? 'var(--primary)' : 'rgba(255,255,255,0.45)', transition: 'all 0.2s',
+  });
 
   return (
     <div className="desktop-app">
@@ -376,34 +439,100 @@ export default function CajaPage() {
             {modo === 'presencial' && (
               <div style={cardStyle}>
                 <p style={labelStyle}>Agregar Productos</p>
-                <input value={busqProd} onChange={e => setBusqProd(e.target.value)} placeholder="Buscar producto..." style={{ ...inputStyle, marginBottom: '12px' }} />
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '8px', maxHeight: '320px', overflowY: 'auto' }}>
-                  {productosFiltrados.map(p => (
-                    <div key={p.Id} onClick={() => agregarProductoPresencial(p)}
-                      style={{ padding: '12px', borderRadius: '10px', cursor: 'pointer', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', transition: 'all 0.2s' }}
-                      onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--primary)'}
-                      onMouseLeave={e => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)'}>
-                      <div style={{ fontSize: '0.8rem', fontWeight: '700', color: '#fff', marginBottom: '4px' }}>{p.Nombre}</div>
-                      <div style={{ fontSize: '0.85rem', color: 'var(--primary)', fontWeight: '800' }}>Gs. {fmt(p.Precio)}</div>
-                    </div>
-                  ))}
+                <div style={{ position: 'relative', marginBottom: '10px' }}>
+                  <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', fontSize: '0.9rem', pointerEvents: 'none' }}>🔍</span>
+                  <input
+                    ref={busqProdRef}
+                    value={busqProd}
+                    onChange={e => setBusqProd(e.target.value)}
+                    onKeyDown={onBuscarKeyDown}
+                    autoFocus
+                    placeholder="Buscar por nombre o código · Enter agrega (lector de barras)"
+                    style={{ ...inputStyle, paddingLeft: '36px' }}
+                  />
+                  {busqProd && (
+                    <button onClick={() => { setBusqProd(''); busqProdRef.current?.focus(); }} title="Limpiar"
+                      style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', background: 'rgba(255,255,255,0.08)', border: 'none', color: 'rgba(255,255,255,0.6)', borderRadius: '5px', padding: '2px 7px', cursor: 'pointer', fontSize: '0.7rem', fontWeight: '700' }}>✕</button>
+                  )}
+                </div>
+
+                {/* Chips de categoría */}
+                {categorias.length > 0 && (
+                  <div style={{ display: 'flex', gap: '6px', marginBottom: '12px', flexWrap: 'wrap' }}>
+                    <button onClick={() => setCatSel('todas')} style={chipCat(catSel === 'todas')}>Todas</button>
+                    {categorias.map(c => (
+                      <button key={c.Id} onClick={() => setCatSel(c.Id)} style={chipCat(String(catSel) === String(c.Id))}>
+                        {c.Nombre}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '8px', maxHeight: '340px', overflowY: 'auto' }}>
+                  {productosFiltrados.length === 0 ? (
+                    <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem', gridColumn: '1/-1', textAlign: 'center', padding: '1.5rem' }}>
+                      Sin productos que coincidan{_q ? ` con "${busqProd}"` : ''}.
+                    </p>
+                  ) : productosFiltrados.map(p => {
+                    const trackStock = !p.RequierePreparacion;
+                    const stock = Number(p.StockActual) || 0;
+                    const agotado = trackStock && stock <= 0;
+                    return (
+                      <div key={p.Id} onClick={() => agregarProductoPresencial(p)}
+                        style={{ padding: '12px', borderRadius: '10px', cursor: 'pointer', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', transition: 'all 0.2s', position: 'relative' }}
+                        onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--primary)'}
+                        onMouseLeave={e => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)'}>
+                        {p.Codigo && (
+                          <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', fontFamily: 'monospace', marginBottom: '3px', fontWeight: '700' }}>#{p.Codigo}</div>
+                        )}
+                        <div style={{ fontSize: '0.8rem', fontWeight: '700', color: '#fff', marginBottom: '4px', lineHeight: 1.2 }}>{p.Nombre}</div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: '0.85rem', color: 'var(--primary)', fontWeight: '800' }}>Gs. {fmt(p.Precio)}</span>
+                          {trackStock && (
+                            <span style={{
+                              fontSize: '0.6rem', fontWeight: '700', padding: '2px 6px', borderRadius: '5px',
+                              background: agotado ? 'rgba(239,68,68,0.12)' : stock <= (Number(p.StockMinimo) || 0) ? 'rgba(245,158,11,0.12)' : 'rgba(255,255,255,0.05)',
+                              color: agotado ? '#ef4444' : stock <= (Number(p.StockMinimo) || 0) ? '#f59e0b' : 'var(--text-muted)'
+                            }}>
+                              {agotado ? 'agotado' : `stock ${stock}`}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
 
             {items.length > 0 && (
               <div style={cardStyle}>
-                <p style={labelStyle}>Detalle del Consumo</p>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <p style={{ ...labelStyle, marginBottom: 0 }}>
+                    Detalle del Consumo · {items.reduce((s, i) => s + i.cantidad, 0)} u
+                  </p>
+                  {modo === 'presencial' && (
+                    <button onClick={vaciarCarrito} style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)', color: '#ef4444', borderRadius: '7px', padding: '4px 10px', cursor: 'pointer', fontSize: '0.65rem', fontWeight: '800' }}>
+                      🗑 Vaciar
+                    </button>
+                  )}
+                </div>
                 {items.map((it, i) => (
-                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                    <div style={{ flex: 1 }}>
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.04)', gap: '8px' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
                       <span style={{ color: '#fff', fontSize: '0.85rem' }}>{it.nombre}</span>
+                      <div style={{ fontSize: '0.62rem', color: 'var(--text-muted)' }}>Gs. {fmt(it.precioUnitario)} c/u</div>
                     </div>
                     {modo === 'presencial' ? (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <button onClick={() => cambiarCantidad(it.productoId, -1)} style={{ width: '24px', height: '24px', borderRadius: '6px', background: 'rgba(255,255,255,0.08)', border: 'none', color: '#fff', cursor: 'pointer', fontWeight: '900' }}>−</button>
-                        <span style={{ color: 'var(--primary)', fontWeight: '800', width: '24px', textAlign: 'center' }}>{it.cantidad}</span>
+                        <input
+                          type="number" min="1" value={it.cantidad}
+                          onChange={e => setCantidadExacta(it.productoId, e.target.value)}
+                          style={{ width: '38px', textAlign: 'center', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.09)', borderRadius: '6px', color: 'var(--primary)', fontWeight: '800', fontSize: '0.8rem', padding: '3px 2px', fontFamily: 'inherit', outline: 'none' }}
+                        />
                         <button onClick={() => cambiarCantidad(it.productoId, 1)} style={{ width: '24px', height: '24px', borderRadius: '6px', background: 'rgba(0,210,190,0.15)', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontWeight: '900' }}>+</button>
+                        <button onClick={() => quitarItem(it.productoId)} title="Quitar" style={{ width: '24px', height: '24px', borderRadius: '6px', background: 'rgba(239,68,68,0.1)', border: 'none', color: '#ef4444', cursor: 'pointer', fontWeight: '900', marginLeft: '2px' }}>✕</button>
                       </div>
                     ) : (
                       <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginRight: '12px' }}>x{it.cantidad}</span>
@@ -458,28 +587,54 @@ export default function CajaPage() {
             </div>
 
             <div style={cardStyle}>
-              <p style={labelStyle}>Tipo de Comprobante</p>
+              <p style={labelStyle}>Tipo de Documento</p>
               <div style={{ display: 'flex', gap: '8px' }}>
-                <button onClick={() => setTipoComprobante('electronica')}
+                <button onClick={() => setTipoDocumento('factura')}
                   style={{
                     flex: 1, padding: '10px 6px', borderRadius: '10px', fontWeight: '700', fontSize: '0.72rem', cursor: 'pointer', transition: 'all 0.2s',
-                    background: tipoComprobante === 'electronica' ? 'rgba(0,210,190,0.12)' : 'rgba(255,255,255,0.03)',
-                    border: `1px solid ${tipoComprobante === 'electronica' ? 'var(--primary)' : 'rgba(255,255,255,0.06)'}`,
-                    color: tipoComprobante === 'electronica' ? 'var(--primary)' : 'rgba(255,255,255,0.4)'
+                    background: tipoDocumento === 'factura' ? 'rgba(0,210,190,0.12)' : 'rgba(255,255,255,0.03)',
+                    border: `1px solid ${tipoDocumento === 'factura' ? 'var(--primary)' : 'rgba(255,255,255,0.06)'}`,
+                    color: tipoDocumento === 'factura' ? 'var(--primary)' : 'rgba(255,255,255,0.4)'
                   }}>
-                  🌐 Electrónica (SIFEN)
+                  📄 Factura
                 </button>
-                <button onClick={() => setTipoComprobante('normal')}
+                <button onClick={() => setTipoDocumento('nota_credito')}
                   style={{
                     flex: 1, padding: '10px 6px', borderRadius: '10px', fontWeight: '700', fontSize: '0.72rem', cursor: 'pointer', transition: 'all 0.2s',
-                    background: tipoComprobante === 'normal' ? 'rgba(0,210,190,0.12)' : 'rgba(255,255,255,0.03)',
-                    border: `1px solid ${tipoComprobante === 'normal' ? 'var(--primary)' : 'rgba(255,255,255,0.06)'}`,
-                    color: tipoComprobante === 'normal' ? 'var(--primary)' : 'rgba(255,255,255,0.4)'
+                    background: tipoDocumento === 'nota_credito' ? 'rgba(239,68,68,0.12)' : 'rgba(255,255,255,0.03)',
+                    border: `1px solid ${tipoDocumento === 'nota_credito' ? '#ef4444' : 'rgba(255,255,255,0.06)'}`,
+                    color: tipoDocumento === 'nota_credito' ? '#ef4444' : 'rgba(255,255,255,0.4)'
                   }}>
-                  🧾 Factura / Ticket
+                  ↩️ Nota de Crédito
                 </button>
               </div>
             </div>
+
+            {!isConfigFixed && (
+              <div style={cardStyle}>
+                <p style={labelStyle}>Tipo de Comprobante</p>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button onClick={() => setTipoComprobante('electronica')}
+                    style={{
+                      flex: 1, padding: '10px 6px', borderRadius: '10px', fontWeight: '700', fontSize: '0.72rem', cursor: 'pointer', transition: 'all 0.2s',
+                      background: tipoComprobante === 'electronica' ? 'rgba(0,210,190,0.12)' : 'rgba(255,255,255,0.03)',
+                      border: `1px solid ${tipoComprobante === 'electronica' ? 'var(--primary)' : 'rgba(255,255,255,0.06)'}`,
+                      color: tipoComprobante === 'electronica' ? 'var(--primary)' : 'rgba(255,255,255,0.4)'
+                    }}>
+                    🌐 Electrónica (SIFEN)
+                  </button>
+                  <button onClick={() => setTipoComprobante('normal')}
+                    style={{
+                      flex: 1, padding: '10px 6px', borderRadius: '10px', fontWeight: '700', fontSize: '0.72rem', cursor: 'pointer', transition: 'all 0.2s',
+                      background: tipoComprobante === 'normal' ? 'rgba(0,210,190,0.12)' : 'rgba(255,255,255,0.03)',
+                      border: `1px solid ${tipoComprobante === 'normal' ? 'var(--primary)' : 'rgba(255,255,255,0.06)'}`,
+                      color: tipoComprobante === 'normal' ? 'var(--primary)' : 'rgba(255,255,255,0.4)'
+                    }}>
+                    🧾 Factura / Ticket
+                  </button>
+                </div>
+              </div>
+            )}
 
             {tipoComprobante === 'electronica' && (
               <div style={cardStyle}>
@@ -525,8 +680,8 @@ export default function CajaPage() {
 
             <button onClick={emitirFactura} disabled={emitiendo || items.length === 0}
               className="luxury-button"
-              style={{ width: '100%', padding: '16px', fontSize: '0.9rem', background: 'var(--accent-gradient)', color: '#000', opacity: (emitiendo || items.length === 0) ? 0.5 : 1, cursor: items.length === 0 ? 'not-allowed' : 'pointer' }}>
-              {emitiendo ? '⏳ Emitiendo factura...' : `✅ EMITIR ${tipoComprobante === 'electronica' ? 'FACTURA ELECTRÓNICA' : 'COMPROBANTE'}`}
+              style={{ width: '100%', padding: '16px', fontSize: '0.9rem', background: tipoDocumento === 'nota_credito' ? 'linear-gradient(to right, #ef4444, #dc2626)' : 'var(--accent-gradient)', color: tipoDocumento === 'nota_credito' ? '#fff' : '#000', opacity: (emitiendo || items.length === 0) ? 0.5 : 1, cursor: items.length === 0 ? 'not-allowed' : 'pointer', border: 'none', fontWeight: '900' }}>
+              {emitiendo ? '⏳ Procesando...' : `✅ EMITIR ${tipoDocumento === 'nota_credito' ? 'NOTA DE CRÉDITO' : (tipoComprobante === 'electronica' ? 'FACTURA ELECTRÓNICA' : 'COMPROBANTE')}`}
             </button>
           </div>
         </div>

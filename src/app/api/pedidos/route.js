@@ -20,9 +20,14 @@ export async function GET() {
 }
 
 // POST /api/pedidos — crear pedido presencial o de mesa con sus ítems
+//
+// CAMBIOS:
+//   - meseroId: ahora se acepta del payload. El cajero deja de "ser" el mesero.
+//     Fallback en cadena: meseroId del payload → cajeroId → 1 (legacy).
+//   - CostoUnitario: cada ítem se inserta con su snapshot vía fn_CostoProducto.
 export async function POST(request) {
   try {
-    const { tipo, cajeroId, items, mesaNumero } = await request.json();
+    const { tipo, cajeroId, meseroId, items, mesaNumero } = await request.json();
 
     if (!items || items.length === 0) {
       return NextResponse.json({ error: 'El pedido no tiene ítems.' }, { status: 400 });
@@ -42,12 +47,16 @@ export async function POST(request) {
       }
     }
 
+    // El mesero real (del payload) tiene prioridad sobre el cajero.
+    // Para ventas presenciales, normalmente meseroId === cajeroId.
+    const efectivoMeseroId = meseroId || cajeroId || 1;
+
     // Insertar pedido
     const pedRes = await pool.request()
-      .input('mesaId',   sql.Int,            mesaId)
-      .input('meseroId', sql.Int,            cajeroId || 1)
-      .input('total',    sql.Decimal(18, 2), total)
-      .input('estado',   sql.NVarChar(50),   'Abierto')
+      .input('mesaId', sql.Int, mesaId)
+      .input('meseroId', sql.Int, efectivoMeseroId)
+      .input('total', sql.Decimal(18, 2), total)
+      .input('estado', sql.NVarChar(50), 'Abierto')
       .query(`
         INSERT INTO Pedidos (MesaId, MeseroId, Total, Estado, FechaCreacion)
         VALUES (@mesaId, @meseroId, @total, @estado, GETDATE());
@@ -56,22 +65,25 @@ export async function POST(request) {
 
     const pedidoId = pedRes.recordset[0].PedidoId;
 
-    // Insertar ítems
+    // Insertar ítems CON snapshot de costo (vía fn_CostoProducto)
     for (const item of items) {
       await pool.request()
-        .input('pedidoId',      sql.Int,          pedidoId)
-        .input('productoId',    sql.Int,          item.productoId)
-        .input('cantidad',      sql.Int,          item.cantidad)
-        .input('precioUnitario',sql.Decimal(18,2),item.precioUnitario)
+        .input('pedidoId', sql.Int, pedidoId)
+        .input('productoId', sql.Int, item.productoId)
+        .input('cantidad', sql.Int, item.cantidad)
+        .input('precioUnitario', sql.Decimal(18, 2), item.precioUnitario)
         .query(`
-          INSERT INTO ItemsPedido (PedidoId, ProductoId, Cantidad, PrecioUnitario, EstadoItemId)
-          VALUES (@pedidoId, @productoId, @cantidad, @precioUnitario, 3)
-        `); // EstadoItemId=3 (Listo) para presencial — no pasa por cocina
+          INSERT INTO ItemsPedido
+            (PedidoId, ProductoId, Cantidad, PrecioUnitario, CostoUnitario, EstadoItemId)
+          VALUES
+            (@pedidoId, @productoId, @cantidad, @precioUnitario,
+             dbo.fn_CostoProducto(@productoId), 3)
+        `);
     }
 
     return NextResponse.json({ pedidoId, total });
   } catch (err) {
-    console.error('Error al crear pedido presencial:', err);
+    console.error('Error al crear pedido:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

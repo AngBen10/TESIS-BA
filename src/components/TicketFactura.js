@@ -389,6 +389,8 @@ const TicketFactura = forwardRef(({ datos = {} }, ref) => {
     montoEntregado = null,
     items = [],
     totalFactura = 0,
+    isElectronica = true,
+    isNotaCredito = false,
   } = datos;
 
   // Usamos los datos dinámicos extraídos de la configuración para imprimir
@@ -438,7 +440,9 @@ const TicketFactura = forwardRef(({ datos = {} }, ref) => {
 
         {/* DATOS FACTURA */}
         <div style={{ ...S.center, marginBottom: '4px' }}>
-          <div style={{ fontSize: '9.5px', fontWeight: 'bold' }}>FACTURA ELECTRÓNICA</div>
+          <div style={{ fontSize: '9.5px', fontWeight: 'bold' }}>
+            {isNotaCredito ? (isElectronica ? 'NOTA DE CRÉDITO ELECTRÓNICA' : 'NOTA DE CRÉDITO') : (isElectronica ? 'FACTURA ELECTRÓNICA' : 'FACTURA / TICKET')}
+          </div>
           <div style={{ fontSize: '13px', fontWeight: 'bold' }}>Nº {numeroFactura}</div>
           <div style={{ fontSize: '8.5px' }}>Timbrado: {timbrado} · Vigencia: {timbradoVigencia}</div>
           <div style={{ fontSize: '8.5px' }}>Est: {establecimiento} · Pto. Exp: {puntoExpedicion}</div>
@@ -498,7 +502,7 @@ const TicketFactura = forwardRef(({ datos = {} }, ref) => {
         <Separador />
 
         {/* CDC */}
-        {cdc && (
+        {(cdc && isElectronica) && (
           <div style={{ marginBottom: '6px' }}>
             <div style={{ fontSize: '8px', textAlign: 'center', marginBottom: '3px', color: '#444' }}>CÓDIGO DE CONTROL (CDC)</div>
             <div style={{ fontFamily: 'monospace', fontSize: '6.5px', wordBreak: 'break-all', background: '#f5f5f5', padding: '4px 5px', borderRadius: '3px', textAlign: 'center', color: '#333' }}>
@@ -508,20 +512,22 @@ const TicketFactura = forwardRef(({ datos = {} }, ref) => {
         )}
 
         {/* QR */}
-        <div style={{ textAlign: 'center', marginBottom: '6px' }}>
-          {enlaceQR
-            ? <QRCanvas value={enlaceQR} size={90} />
-            : <div style={{ width: '90px', height: '90px', border: '1px dashed #ccc', margin: '0 auto 4px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '8px', color: '#999', textAlign: 'center' }}>QR<br />no disponible</div>
-          }
-          <div style={{ fontSize: '8px', color: '#555' }}>Escanee para verificar en e-Kuatia SET</div>
-          <div style={{ marginTop: '4px' }}><BadgeSifen estado={estadoSifen} /></div>
-        </div>
+        {isElectronica && (
+          <div style={{ textAlign: 'center', marginBottom: '6px' }}>
+            {enlaceQR
+              ? <QRCanvas value={enlaceQR} size={90} />
+              : <div style={{ width: '90px', height: '90px', border: '1px dashed #ccc', margin: '0 auto 4px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '8px', color: '#999', textAlign: 'center' }}>QR<br />no disponible</div>
+            }
+            <div style={{ fontSize: '8px', color: '#555' }}>Escanee para verificar en e-Kuatia SET</div>
+            <div style={{ marginTop: '4px' }}><BadgeSifen estado={estadoSifen} /></div>
+          </div>
+        )}
         <Separador />
 
         {/* PIE */}
         <div style={{ textAlign: 'center', fontSize: '9px', marginTop: '4px' }}>
           <div>¡Gracias por su preferencia!</div>
-          <div style={{ fontSize: '7.5px', color: '#777', marginTop: '4px' }}>Powered by ANGLEX Software · e-Kuatia Paraguay</div>
+          <div style={{ fontSize: '7.5px', color: '#777', marginTop: '4px' }}>Powered by ANGLEX Software {isElectronica && '· e-Kuatia Paraguay'}</div>
         </div>
       </div>
     </>

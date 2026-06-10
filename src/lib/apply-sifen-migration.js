@@ -1,7 +1,6 @@
 const fs = require('fs');
 const path = require('path');
 
-// Cargar variables de entorno desde .env.local
 try {
   const envPath = path.resolve(process.cwd(), '.env.local');
   if (fs.existsSync(envPath)) {
@@ -43,7 +42,6 @@ async function runMigration() {
 
     for (let i = 0; i < batches.length; i++) {
       const batch = batches[i];
-      // Ignorar comandos "USE RestauranteDB" porque la conexión ya está establecida en esa BD
       if (batch.toUpperCase().startsWith('USE ')) {
         continue;
       }

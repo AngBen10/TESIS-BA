@@ -36,7 +36,6 @@ export async function GET() {
       ORDER BY Fecha ASC
     `);
 
-    // Fill in missing days with 0
     const ventasSemana = [];
     for (let i = 6; i >= 0; i--) {
       const d = new Date();
@@ -53,6 +52,49 @@ export async function GET() {
       });
     }
 
+    // ── 3b. NUEVO: Ventas últimos 14 días (sparkline) ──
+    const ventas14Res = await pool.request().query(`
+      SELECT 
+        CAST(FechaEmision AS DATE) AS Fecha,
+        ISNULL(SUM(Total), 0) AS Total,
+        COUNT(*) AS Cantidad
+      FROM Facturas
+      WHERE FechaEmision >= DATEADD(DAY, -13, CAST(GETDATE() AS DATE))
+      GROUP BY CAST(FechaEmision AS DATE)
+      ORDER BY Fecha ASC
+    `);
+    const ventas14dias = [];
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0];
+      const found = ventas14Res.recordset.find(
+        r => new Date(r.Fecha).toISOString().split('T')[0] === dateStr
+      );
+      ventas14dias.push({
+        fecha: dateStr,
+        diaNombre: d.toLocaleDateString('es-ES', { weekday: 'short' }),
+        total: found ? Number(found.Total) : 0,
+        cantidad: found ? found.Cantidad : 0,
+      });
+    }
+
+    // ── 3c. NUEVO: Semana anterior (días -13 a -7) para comparativa ──
+    const semanaAnteriorRes = await pool.request().query(`
+      SELECT ISNULL(SUM(Total), 0) AS Total
+      FROM Facturas
+      WHERE FechaEmision >= DATEADD(DAY, -13, CAST(GETDATE() AS DATE))
+        AND FechaEmision <  DATEADD(DAY, -6, CAST(GETDATE() AS DATE))
+    `);
+    const ventasSemanaAnterior = Number(semanaAnteriorRes.recordset[0].Total);
+    const ventasSemanaActual = ventasSemana.reduce((s, d) => s + d.total, 0);
+    let cambioSemanal = 0;
+    if (ventasSemanaAnterior > 0) {
+      cambioSemanal = Math.round(((ventasSemanaActual - ventasSemanaAnterior) / ventasSemanaAnterior) * 1000) / 10;
+    } else if (ventasSemanaActual > 0) {
+      cambioSemanal = 100;
+    }
+
     // ── 4. Ventas del MES ──
     const ventasMesRes = await pool.request().query(`
       SELECT ISNULL(SUM(Total), 0) AS VentasMes, COUNT(*) AS FacturasMes
@@ -60,6 +102,46 @@ export async function GET() {
       WHERE MONTH(FechaEmision) = MONTH(GETDATE()) AND YEAR(FechaEmision) = YEAR(GETDATE())
     `);
     const { VentasMes, FacturasMes } = ventasMesRes.recordset[0];
+
+    // ── 4b. NUEVO: Food Cost de HOY (usa CostoUnitario snapshot) ──
+    let foodCostHoy = 0, margenHoy = 0, costoHoy = 0;
+    try {
+      const fcHoyRes = await pool.request().query(`
+        SELECT 
+          ISNULL(SUM(ip.Cantidad * ip.PrecioUnitario), 0) AS Ingresos,
+          ISNULL(SUM(ip.Cantidad * ip.CostoUnitario), 0)  AS Costo
+        FROM Facturas f
+        INNER JOIN Pedidos pe ON f.PedidoId = pe.Id
+        INNER JOIN ItemsPedido ip ON ip.PedidoId = pe.Id
+        WHERE CAST(f.FechaEmision AS DATE) = CAST(GETDATE() AS DATE)
+      `);
+      const ing = Number(fcHoyRes.recordset[0].Ingresos);
+      const cos = Number(fcHoyRes.recordset[0].Costo);
+      costoHoy = Math.round(cos);
+      margenHoy = Math.round(ing - cos);
+      foodCostHoy = ing > 0 && cos > 0 ? Math.round((cos / ing) * 1000) / 10 : 0;
+    } catch (e) {
+      // Si la columna CostoUnitario no existe aún (migración entrega 1 no aplicada),
+      // devolvemos 0 sin romper el dashboard.
+      console.warn('Food cost no disponible (¿falta migración?):', e.message);
+    }
+
+    // ── 4c. NUEVO: Food Cost del MES ──
+    let foodCostMes = 0;
+    try {
+      const fcMesRes = await pool.request().query(`
+        SELECT 
+          ISNULL(SUM(ip.Cantidad * ip.PrecioUnitario), 0) AS Ingresos,
+          ISNULL(SUM(ip.Cantidad * ip.CostoUnitario), 0)  AS Costo
+        FROM Facturas f
+        INNER JOIN Pedidos pe ON f.PedidoId = pe.Id
+        INNER JOIN ItemsPedido ip ON ip.PedidoId = pe.Id
+        WHERE MONTH(f.FechaEmision) = MONTH(GETDATE()) AND YEAR(f.FechaEmision) = YEAR(GETDATE())
+      `);
+      const ing = Number(fcMesRes.recordset[0].Ingresos);
+      const cos = Number(fcMesRes.recordset[0].Costo);
+      foodCostMes = ing > 0 && cos > 0 ? Math.round((cos / ing) * 1000) / 10 : 0;
+    } catch (e) { /* idem */ }
 
     // ── 5. Productos MÁS VENDIDOS (top 5) ──
     const topProductosRes = await pool.request().query(`
@@ -121,7 +203,6 @@ export async function GET() {
       ORDER BY Hora
     `);
 
-    // Fill all 24 hours
     const distribucionHoraria = [];
     for (let h = 0; h < 24; h++) {
       const found = horariaRes.recordset.find(r => r.Hora === h);
@@ -130,6 +211,14 @@ export async function GET() {
         cantidad: found ? found.Cantidad : 0,
         total: found ? Number(found.Total) : 0,
       });
+    }
+
+    // ── 8b. NUEVO: Hora pico del día ──
+    let horaPico = { hora: null, total: 0, cantidad: 0 };
+    for (const h of distribucionHoraria) {
+      if (h.total > horaPico.total) {
+        horaPico = { hora: h.hora, total: h.total, cantidad: h.cantidad };
+      }
     }
 
     // ── 9. Últimas 10 FACTURAS ──
@@ -165,7 +254,6 @@ export async function GET() {
       SELECT COUNT(*) AS Total FROM Pedidos WHERE Estado = 'Abierto'
     `);
 
-    // Porcentaje de cambio vs ayer
     let porcentajeCambio = 0;
     if (VentasAyer > 0) {
       porcentajeCambio = ((VentasHoy - VentasAyer) / VentasAyer * 100).toFixed(1);
@@ -213,6 +301,17 @@ export async function GET() {
         categoria: r.Categoria,
       })),
       pedidosActivosBD: pedidosActivosRes.recordset[0].Total,
+
+      // ───── CAMPOS NUEVOS (dashboard mejorado) ─────
+      ventas14dias,
+      ventasSemanaActual,
+      ventasSemanaAnterior,
+      cambioSemanal,
+      foodCostHoy,
+      foodCostMes,
+      margenHoy,
+      costoHoy,
+      horaPico,
     });
 
   } catch (err) {

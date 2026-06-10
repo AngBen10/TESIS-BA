@@ -16,9 +16,9 @@ const INITIAL_MESAS = Array.from({ length: 12 }, (_, i) => ({
 
 const STATE_CONFIG = {
   'Disponible': { color: '#22c55e', bg: '#052e16', badge: '#14532d', icon: '✓' },
-  'Ocupada':    { color: '#ef4444', bg: '#2d0a0a', badge: '#450a0a', icon: '●' },
-  'Reservada':  { color: '#f59e0b', bg: '#2d1f02', badge: '#451a03', icon: '◆' },
-  'En Limpieza':{ color: '#00D2BE', bg: '#021f1e', badge: '#033d3a', icon: '◎' },
+  'Ocupada': { color: '#ef4444', bg: '#2d0a0a', badge: '#450a0a', icon: '●' },
+  'Reservada': { color: '#f59e0b', bg: '#2d1f02', badge: '#451a03', icon: '◆' },
+  'En Limpieza': { color: '#00D2BE', bg: '#021f1e', badge: '#033d3a', icon: '◎' },
 };
 
 export default function Mesas() {
@@ -29,7 +29,7 @@ export default function Mesas() {
   const [showCobrarModal, setShowCobrarModal] = useState(false);
   const [showReservaInputs, setShowReservaInputs] = useState(false);
   const [showReservasList, setShowReservasList] = useState(false);
-  
+
   // Tick to force re-render every second for timers
   const [, setTick] = useState(0);
 
@@ -37,17 +37,51 @@ export default function Mesas() {
   const [reservaFecha, setReservaFecha] = useState('');
   const [reservaHora, setReservaHora] = useState('');
   const [reservaNombre, setReservaNombre] = useState('');
-  
+
   const [ruc, setRuc] = useState('');
   const [nombreCliente, setNombreCliente] = useState('');
   const [metodoPago, setMetodoPago] = useState('Efectivo');
   const [filterEstado, setFilterEstado] = useState('Todas');
+  const [busquedaMesa, setBusquedaMesa] = useState('');
   const router = useRouter();
 
-  const loadData = useCallback(() => {
+  const loadData = useCallback(async () => {
+    // 1. Estado operativo efímero desde localStorage
     const storedMesas = localStorage.getItem('restaurante_mesas');
-    let loadedMesas = storedMesas ? JSON.parse(storedMesas) : INITIAL_MESAS;
-    
+    const localMesas = storedMesas ? JSON.parse(storedMesas) : [];
+
+    // 2. Configuración de mesas desde BD (fuente de verdad: número y capacidad)
+    let bdMesas = [];
+    try {
+      const r = await fetch('/api/mesas');
+      if (r.ok) {
+        const d = await r.json();
+        bdMesas = d.mesas || [];
+      }
+    } catch (_) { }
+
+    let loadedMesas;
+    if (bdMesas.length > 0) {
+      // Merge: config de BD + estado operativo local (matcheado por número).
+      // Mesas nuevas en BD → aparecen como 'Disponible'.
+      // Mesas borradas en BD → desaparecen del salón.
+      loadedMesas = bdMesas.map(bm => {
+        const local = localMesas.find(lm => lm.numero === bm.Numero);
+        return {
+          id: bm.Id,
+          numero: bm.Numero,
+          capacidad: bm.Capacidad,
+          estado: local?.estado || 'Disponible',
+          pedidoActivo: local?.pedidoActivo || false,
+          limpiezaFinAt: local?.limpiezaFinAt || null,
+          reservas: local?.reservas || [],
+        };
+      });
+    } else {
+      // Fallback si la BD no respondió o no tiene mesas: usar local o INITIAL
+      loadedMesas = localMesas.length > 0 ? localMesas : INITIAL_MESAS;
+    }
+
     // Migrate old reservations format to array format if needed
     loadedMesas = loadedMesas.map(m => {
       const u = { ...m };
@@ -101,12 +135,12 @@ export default function Mesas() {
   useEffect(() => {
     const timer = setInterval(() => {
       setTick(t => t + 1); // Force re-render for real-time timer display
-      
+
       setMesas(prev => {
         let changed = false;
         const next = prev.map(m => {
           let updatedM = { ...m };
-          
+
           // 1. Cleaning logic (Persistent via timestamp)
           if (m.estado === 'En Limpieza' && m.limpiezaFinAt) {
             if (Date.now() >= m.limpiezaFinAt) {
@@ -127,13 +161,13 @@ export default function Mesas() {
             changed = true;
             updatedM.estado = 'Reservada';
           }
-          
+
           // 3. Clear old reservations (1 hour after time)
           const validReservas = reservas.filter(r => now <= r.timestamp + (1 * 3600 * 1000));
           if (validReservas.length !== reservas.length) {
             changed = true;
             updatedM.reservas = validReservas;
-            
+
             // If the table was in 'Reservada' state but now has no soon reservations, set it back to 'Disponible'
             const stillHasSoon = validReservas.some(r => now >= (r.timestamp - tresHoras) && now <= r.timestamp);
             if (!stillHasSoon && updatedM.estado === 'Reservada') {
@@ -159,9 +193,9 @@ export default function Mesas() {
     const updated = mesas.map(m => {
       if (m.id !== selectedMesa.id) return m;
       const u = { ...m, estado: nuevoEstado };
-      if (nuevoEstado === 'En Limpieza') { 
-        u.limpiezaFinAt = Date.now() + (300 * 1000); 
-        u.pedidoActivo = false; 
+      if (nuevoEstado === 'En Limpieza') {
+        u.limpiezaFinAt = Date.now() + (300 * 1000);
+        u.pedidoActivo = false;
       }
       else if (nuevoEstado !== 'Ocupada') u.pedidoActivo = false;
       return u;
@@ -189,7 +223,7 @@ export default function Mesas() {
       return;
     }
     const newTimestamp = dt.getTime();
-    
+
     if (newTimestamp < Date.now() - 10 * 60 * 1000) {
       alert("No puedes programar una reserva en el pasado.");
       return;
@@ -198,7 +232,7 @@ export default function Mesas() {
     const conflictWindow = 2 * 3600 * 1000; // Rango de 2 horas de conflicto
     const currentReservations = selectedMesa.reservas || [];
     const hasConflict = currentReservations.some(r => Math.abs(r.timestamp - newTimestamp) < conflictWindow);
-    
+
     if (hasConflict) {
       alert("Error: Ya existe una reserva para esta mesa en un horario cercano (rango de 2 horas). Por favor elige otro horario.");
       return;
@@ -209,12 +243,12 @@ export default function Mesas() {
       timestamp: newTimestamp,
       nombre: reservaNombre
     };
-    
+
     const updatedReservas = [...currentReservations, newReserva].sort((a, b) => a.timestamp - b.timestamp);
 
     const updated = mesas.map(m => {
       if (m.id !== selectedMesa.id) return m;
-      
+
       const u = { ...m, reservas: updatedReservas };
       const now = Date.now();
       const tresHoras = 3 * 3600 * 1000;
@@ -236,10 +270,10 @@ export default function Mesas() {
   const eliminarReservaEspecifica = (reservaId) => {
     const currentReservas = selectedMesa.reservas || [];
     const updatedReservas = currentReservas.filter(r => r.id !== reservaId);
-    
+
     const updated = mesas.map(m => {
       if (m.id !== selectedMesa.id) return m;
-      
+
       const u = { ...m, reservas: updatedReservas };
       const now = Date.now();
       const tresHoras = 3 * 3600 * 1000;
@@ -257,7 +291,7 @@ export default function Mesas() {
 
   const confirmarCobro = () => {
     const pedidosMesa = pedidos.filter(p => p.mesa === `Mesa ${selectedMesa.numero}` && p.estado !== 'Pagado');
-    
+
     // Mark ALL orders for this table as paid
     if (pedidosMesa.length > 0) {
       const idsToPay = pedidosMesa.map(p => p.id);
@@ -308,7 +342,11 @@ export default function Mesas() {
     return active.every(p => p.estado === 'Listo');
   };
 
-  const mesasFiltradas = filterEstado === 'Todas' ? mesas : mesas.filter(m => m.estado === filterEstado);
+  const mesasFiltradas = mesas.filter(m => {
+    const matchEstado = filterEstado === 'Todas' || m.estado === filterEstado;
+    const matchBusqueda = !busquedaMesa.trim() || String(m.numero).includes(busquedaMesa.trim());
+    return matchEstado && matchBusqueda;
+  });
 
   const stats = {
     total: mesas.length,
@@ -352,8 +390,8 @@ export default function Mesas() {
           </div>
         </header>
 
-        {/* Filtros */}
-        <div style={{ display: 'flex', gap: '8px', marginBottom: '1.2rem' }}>
+        {/* Filtros + buscador */}
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '1.2rem', alignItems: 'center', flexWrap: 'wrap' }}>
           {['Todas', 'Disponible', 'Ocupada', 'Reservada', 'En Limpieza'].map(f => (
             <button
               key={f}
@@ -369,7 +407,34 @@ export default function Mesas() {
               {f}
             </button>
           ))}
+          <div style={{ position: 'relative', marginLeft: 'auto', width: '220px' }}>
+            <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', fontSize: '0.85rem', pointerEvents: 'none' }}>🔍</span>
+            <input
+              type="text"
+              inputMode="numeric"
+              placeholder="Buscar mesa por N°..."
+              value={busquedaMesa}
+              onChange={e => setBusquedaMesa(e.target.value)}
+              style={{
+                width: '100%', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.09)',
+                borderRadius: '8px', padding: '7px 30px 7px 34px', color: '#fff', fontSize: '0.8rem',
+                fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box',
+              }}
+            />
+            {busquedaMesa && (
+              <button onClick={() => setBusquedaMesa('')} title="Limpiar"
+                style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', background: 'rgba(255,255,255,0.08)', border: 'none', color: 'rgba(255,255,255,0.6)', borderRadius: '5px', padding: '1px 6px', cursor: 'pointer', fontSize: '0.65rem', fontWeight: '700' }}>
+                ✕
+              </button>
+            )}
+          </div>
         </div>
+
+        {busquedaMesa.trim() && (
+          <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '-0.6rem', marginBottom: '1rem', fontWeight: '600' }}>
+            Mostrando <strong style={{ color: 'var(--primary)' }}>{mesasFiltradas.length}</strong> mesa{mesasFiltradas.length !== 1 ? 's' : ''} que coincide{mesasFiltradas.length !== 1 ? 'n' : ''} con &quot;{busquedaMesa}&quot;
+          </p>
+        )}
 
         {/* Grid Mesas */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.75rem' }}>
@@ -418,15 +483,15 @@ export default function Mesas() {
                     ⏳ {formatTimeRemaining(mesa.limpiezaFinAt)}
                   </div>
                 ) : getSoonReservation(mesa) && mesa.estado !== 'Ocupada' ? (
-                   (() => {
-                     const soon = getSoonReservation(mesa);
-                     return (
-                       <div style={{ textAlign: 'center' }}>
-                         <div style={{ fontSize: '0.65rem', color: '#f59e0b', fontWeight: '800' }}>📅 {new Date(soon.timestamp).toLocaleTimeString('es-PY', { hour: '2-digit', minute: '2-digit', hour12: false })} hs</div>
-                         <div style={{ fontSize: '0.55rem', color: 'rgba(255,255,255,0.4)', fontWeight: '700', textTransform: 'uppercase' }}>{soon.nombre}</div>
-                       </div>
-                     );
-                   })()
+                  (() => {
+                    const soon = getSoonReservation(mesa);
+                    return (
+                      <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: '0.65rem', color: '#f59e0b', fontWeight: '800' }}>📅 {new Date(soon.timestamp).toLocaleTimeString('es-PY', { hour: '2-digit', minute: '2-digit', hour12: false })} hs</div>
+                        <div style={{ fontSize: '0.55rem', color: 'rgba(255,255,255,0.4)', fontWeight: '700', textTransform: 'uppercase' }}>{soon.nombre}</div>
+                      </div>
+                    );
+                  })()
                 ) : pending ? (
                   <div style={{
                     display: 'flex', alignItems: 'center', gap: '5px',
@@ -438,13 +503,13 @@ export default function Mesas() {
                     {ready ? '✅ Listo' : '🍳 En Cocina'}
                   </div>
                 ) : served ? (
-                   <div style={{ 
-                     display: 'flex', alignItems: 'center', gap: '5px',
-                     fontSize: '0.7rem', fontWeight: '800', color: '#22c55e',
-                     background: 'rgba(34,197,94,0.1)', padding: '3px 8px', borderRadius: '6px'
-                   }}>
-                     🍽️ Servido
-                   </div>
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: '5px',
+                    fontSize: '0.7rem', fontWeight: '800', color: '#22c55e',
+                    background: 'rgba(34,197,94,0.1)', padding: '3px 8px', borderRadius: '6px'
+                  }}>
+                    🍽️ Servido
+                  </div>
                 ) : null}
               </div>
             );
@@ -511,13 +576,13 @@ export default function Mesas() {
               </div>
 
               <div style={{ background: 'rgba(245,158,11,0.03)', border: '1px solid rgba(245,158,11,0.15)', borderRadius: '14px', padding: '1.2rem', marginBottom: '1.5rem' }}>
-                <div 
+                <div
                   onClick={() => setShowReservasList(!showReservasList)}
-                  style={{ 
-                    display: 'flex', 
-                    justifyContent: 'space-between', 
-                    alignItems: 'center', 
-                    cursor: 'pointer', 
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    cursor: 'pointer',
                     userSelect: 'none',
                     marginBottom: showReservasList ? '12px' : '0px'
                   }}
@@ -544,8 +609,8 @@ export default function Mesas() {
                                 A nombre de: {res.nombre}
                               </div>
                             </div>
-                            <button 
-                              onClick={() => eliminarReservaEspecifica(res.id)} 
+                            <button
+                              onClick={() => eliminarReservaEspecifica(res.id)}
                               style={{ background: 'transparent', border: 'none', color: '#ef4444', fontSize: '0.65rem', fontWeight: '800', cursor: 'pointer', padding: '4px' }}
                             >
                               ✕ Eliminar
@@ -564,44 +629,44 @@ export default function Mesas() {
                 {showReservaInputs ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '12px' }}>
                     <p style={{ fontSize: '0.7rem', color: '#f59e0b', fontWeight: '700', textTransform: 'uppercase', margin: 0 }}>Nueva Reserva</p>
-                    <input 
-                      type="text" 
-                      placeholder="Nombre de quien reserva..." 
-                      value={reservaNombre} 
-                      onChange={e => setReservaNombre(e.target.value)} 
-                      className="luxury-input" 
-                      style={{ width: '100%', padding: '8px' }} 
+                    <input
+                      type="text"
+                      placeholder="Nombre de quien reserva..."
+                      value={reservaNombre}
+                      onChange={e => setReservaNombre(e.target.value)}
+                      className="luxury-input"
+                      style={{ width: '100%', padding: '8px' }}
                     />
                     <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '8px' }}>
-                      <input 
-                        type="date" 
-                        value={reservaFecha} 
-                        onChange={e => setReservaFecha(e.target.value)} 
-                        className="luxury-input" 
-                        style={{ padding: '8px' }} 
+                      <input
+                        type="date"
+                        value={reservaFecha}
+                        onChange={e => setReservaFecha(e.target.value)}
+                        className="luxury-input"
+                        style={{ padding: '8px' }}
                       />
-                      <input 
-                        type="time" 
-                        value={reservaHora} 
-                        onChange={e => setReservaHora(e.target.value)} 
-                        className="luxury-input" 
+                      <input
+                        type="time"
+                        value={reservaHora}
+                        onChange={e => setReservaHora(e.target.value)}
+                        className="luxury-input"
                         style={{ padding: '8px', color: '#fff', background: '#0d0f14', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px' }}
                       />
                     </div>
                     <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
-                      <button 
+                      <button
                         onClick={() => {
                           setShowReservaInputs(false);
                           setReservaFecha('');
                           setReservaHora('');
                           setReservaNombre('');
-                        }} 
+                        }}
                         style={{ flex: 1, padding: '8px', background: 'rgba(255,255,255,0.05)', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '0.7rem', cursor: 'pointer' }}
                       >
                         Cancelar
                       </button>
-                      <button 
-                        onClick={programarReserva} 
+                      <button
+                        onClick={programarReserva}
                         style={{ flex: 1, padding: '8px', background: '#f59e0b', color: '#000', border: 'none', borderRadius: '8px', fontSize: '0.7rem', fontWeight: '800', cursor: 'pointer' }}
                       >
                         Confirmar
@@ -609,8 +674,8 @@ export default function Mesas() {
                     </div>
                   </div>
                 ) : (
-                  <button 
-                    onClick={() => setShowReservaInputs(true)} 
+                  <button
+                    onClick={() => setShowReservaInputs(true)}
                     style={{ width: '100%', padding: '10px', background: 'rgba(245,158,11,0.1)', color: '#f59e0b', border: '1px dashed #f59e0b', borderRadius: '10px', fontSize: '0.75rem', fontWeight: '700', cursor: 'pointer' }}
                   >
                     ＋ Programar Nueva Reserva
